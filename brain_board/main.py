@@ -6,7 +6,6 @@ import uart_tx
 # --- Polling intervals (ms) ---
 PIR_INTERVAL = 100
 ULTRASONIC_INTERVAL = 500
-DHT_INTERVAL = 30000
 
 # --- Timer helpers ---
 def ticks_ms():
@@ -19,13 +18,10 @@ def ticks_past(deadline):
 now = ticks_ms()
 pir_deadline = now
 ultrasonic_deadline = now
-dht_deadline = time.ticks_add(now, DHT_INTERVAL)
 
 # --- Cached sensor values ---
 pir_detected = False
 distance_cm = None
-temperature = None
-humidity = None
 
 print("Brain board starting...")
 
@@ -49,13 +45,6 @@ while True:
         else:
             distance_cm = None
         ultrasonic_deadline = time.ticks_add(ticks_ms(), ULTRASONIC_INTERVAL)
-
-    # Poll DHT11 every 30s (idle only, non-critical)
-    if ticks_past(dht_deadline):
-        reading = sensors.poll_dht11()
-        if reading is not None:
-            temperature, humidity = reading
-        dht_deadline = time.ticks_add(ticks_ms(), DHT_INTERVAL)
 
     # Run behavior state machine
     api_action = behavior.tick(pir_detected, distance_cm)

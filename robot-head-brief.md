@@ -59,7 +59,6 @@ The head is not a toy and not a novelty. It is a physical AI agent with personal
 | PIR sensor | Passive infrared — detects presence up to 7m. Binary output. | GP16 (suggested) |
 | Ultrasonic (HC-SR04) | Distance sensing 3mm-4m accuracy. TRIG and ECHO pins. | TRIG=GP14, ECHO=GP15 |
 | MPU6050 | Gyroscope + accelerometer. I2C. Detects tilt, shake, motion. | SDA=GP4, SCL=GP5 |
-| DHT11 | Temperature and humidity. Single data pin. | GP22 (suggested) |
 
 ### 2.4 Actuators (on Brain Board)
 
@@ -319,7 +318,6 @@ while True:
 - Random glance to new position every 2-5 seconds
 - Occasional slow look down then back up
 - Head servo makes micro-adjustments — never completely still
-- DHT11 checks room temperature every 30 seconds
 
 ### 5.2 Presence Detection (PIR fires)
 - Eyes shift to alert expression — cyan iris, dilated pupil
@@ -364,7 +362,7 @@ while True:
 | `main.py` | Boot, WiFi, event loop, sensor polling, UART tx to eyes | To build |
 | `config.json` | WiFi, API key, personality, assistant name | Exists — working |
 | `api.py` | Claude API call handler, system prompt injection | To build |
-| `sensors.py` | PIR, ultrasonic, MPU6050, DHT11 polling module | To build |
+| `sensors.py` | PIR, ultrasonic, MPU6050 polling module | To build |
 | `motors.py` | Servo yaw and stepper pitch control | To build |
 | `uart_tx.py` | Send commands to eye board over UART | To build |
 | `audio.py` | PWM audio output via 2N3055 to speakers | To build |
@@ -455,7 +453,7 @@ Each module is tested independently in Thonny REPL before integration:
 4. **`main.py`** — Run the full loop with no UART connected. Verify the eye blinks, glances, and drifts autonomously for 5+ minutes without error. Then connect UART and verify commands override idle behavior correctly.
 
 ### Phase 2 — Brain Board Sensors
-- Build `sensors.py` — PIR, ultrasonic, DHT11 polling
+- Build `sensors.py` — PIR, ultrasonic polling
 - Test each sensor independently with print() output
 - Build `behavior.py` state machine — idle, alert, interacting, sleeping
 - Confirm state transitions trigger correct UART commands to eye board
