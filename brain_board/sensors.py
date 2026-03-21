@@ -1,12 +1,9 @@
 from machine import Pin
 import time
-import dht
-
 # --- Pin setup ---
 pir_pin = Pin(16, Pin.IN)
 trig_pin = Pin(14, Pin.OUT)
 echo_pin = Pin(15, Pin.IN)
-dht_sensor = dht.DHT11(Pin(22))
 
 
 def poll_pir():
@@ -42,16 +39,3 @@ def poll_ultrasonic():
     duration = time.ticks_diff(end, start)
     distance_cm = (duration * 0.0343) / 2
     return distance_cm
-
-
-def poll_dht11():
-    """Read DHT11 temperature and humidity.
-
-    Returns (temperature_c, humidity_percent) or None on error.
-    Call at most once every 2 seconds (sensor limitation).
-    """
-    try:
-        dht_sensor.measure()
-        return (dht_sensor.temperature(), dht_sensor.humidity())
-    except OSError:
-        return None
