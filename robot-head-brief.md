@@ -6,7 +6,7 @@
 |---|---|
 | Project Name | Animatronic Robot Head (working title) |
 | Primary Author | Steven |
-| Target Platform | Raspberry Pi Pico W (brain) + Pimoroni Pico LiPo (eyes) |
+| Target Platform | Raspberry Pi Pico W (single board — brain + display) |
 | Language | MicroPython — Pimoroni custom firmware v1.27.0 |
 | Status | Eye system working. Brain integration pending. |
 | Date | March 21, 2026 |
@@ -34,30 +34,29 @@ The head is not a toy and not a novelty. It is a physical AI agent with personal
 | WiFi | Built-in CYW43439 — confirmed working |
 | Claude API | Confirmed working via urequests over WiFi |
 | Storage | 2MB flash — config.json and personality.json on filesystem |
-| Role | WiFi, Claude API calls, sensor polling, servo/stepper control, UART to eye board |
+| Role | WiFi, Claude API calls, sensor polling, servo/stepper control, display rendering |
 
-### 2.2 Eye Board
+### 2.2 Display (on Pico W)
 
 | Field | Value |
 |---|---|
-| Board | Pimoroni Pico LiPo (RP2040, same pinout as Pico) |
-| Firmware | Pimoroni MicroPython v1.27.0 — picolipo_4mb build |
-| Carrier | Pimoroni Pico Omnibus (dual expander) |
-| Display 1 | Pimoroni Pico Display Pack — 240x135 IPS LCD, ST7789, working on Deck 1 (BL=Pin(20)) |
-| Display 2 | Pimoroni Pico Display Pack — confirmed dead, replacement ordered |
+| Display | Pimoroni Pico Display Pack — 240x135 IPS LCD, ST7789, plugged directly onto Pico W |
+| Backlight | PWM Pin(20) |
 | Library | PicoGraphics — no ellipse method, use fill_ellipse() with rectangle rows |
-| Role | Both eye displays, blinking, gaze, expressions, receives commands via UART from brain |
+| Role | Eye display, blinking, gaze, expressions — driven directly by Pico W |
 
 > **CRITICAL: PicoGraphics does not have an ellipse() method. All ellipses must be drawn using fill_ellipse() which iterates y rows and calls display.rectangle(). This is proven working. Do not attempt display.ellipse() — it will throw AttributeError.**
 
-> **PHASE 1 NOTE: Only one display is functional (Deck 1, BL=Pin(20)) — this serves as the right eye. Phase 1 targets single-eye operation only. When the replacement Display Pack arrives, dual-eye support will be added by initializing a second PicoGraphics instance on Deck 2 and mirroring the render output (with gaze_x inverted for the left eye). The Omnibus expander already provides the second SPI bus — no additional wiring needed.**
+> **NOTE: The Pico LiPo and Omnibus are no longer used. The Pico Display Pack plugs directly onto the Pico W. This eliminates UART communication entirely — the brain and eye code run as a single unified program.**
 
-### 2.3 Sensors (on Brain Board)
+> **Display Pack uses GP10-20 (SPI + buttons + backlight). Sensors have been moved to free pins to avoid conflicts. See pin mapping below.**
+
+### 2.3 Sensors
 
 | Sensor | Description | GPIO |
 |---|---|---|
-| PIR sensor | Passive infrared — detects presence up to 7m. Binary output. | GP16 (suggested) |
-| Ultrasonic (HC-SR04) | Distance sensing 3mm-4m accuracy. TRIG and ECHO pins. | TRIG=GP14, ECHO=GP15 |
+| PIR sensor | Passive infrared — detects presence up to 7m. Binary output. | GP22 (moved from GP16 — display conflict) |
+| Ultrasonic (HC-SR04) | Distance sensing 3mm-4m accuracy. TRIG and ECHO pins. | TRIG=GP26, ECHO=GP27 (moved from GP14/15 — display conflict) |
 | MPU6050 | Gyroscope + accelerometer. I2C. Detects tilt, shake, motion. | SDA=GP4, SCL=GP5 |
 
 ### 2.4 Actuators (on Brain Board)
@@ -263,50 +262,31 @@ response.close()
 
 ---
 
-## 4. Communication Architecture
+## 4. Architecture (Single Board)
 
-The brain (Pico W) and eye controller (Pico LiPo) communicate over UART. The brain sends simple command strings. The eye controller parses and executes them.
+All code runs on the Pico W. The behavior state machine sets eye expression/gaze state directly via module-level variables — no UART needed.
 
-### 4.1 UART Wiring
+### 4.1 Internal Command Flow
 
-| Connection | Pins |
-|---|---|
-| Brain TX | Pico W GP12 (UART1 TX) → Eye board RX (GP1 on Pico LiPo) |
-| Brain RX | Pico W GP13 (UART1 RX) → Eye board TX (GP0 on Pico LiPo) |
-| Shared GND | Common ground between both boards required |
-| Baud rate | 9600 |
+The behavior module (`behavior.py`) sets these module-level variables when state transitions occur:
 
-### 4.2 Command Protocol
-
-Commands are plain text strings terminated with newline `\n`.
-
-| Command | Eye Response | Trigger |
+| Variable | Type | Purpose |
 |---|---|---|
-| `EXP:normal` | Blue iris, normal pupil, idle behavior | Default state |
-| `EXP:alert` | Cyan iris, dilated pupil, faster micro-drift | PIR detects presence |
-| `EXP:angry` | Red iris, contracted pupil | Raised voice or command |
-| `EXP:sleepy` | Dark blue, small pupil, slow blink | Inactivity timeout |
-| `EXP:thinking` | Iris dims, pupil contracts, gaze up-left | API call in progress |
-| `GAZE:x,y` | Smooth glance to absolute x,y offset | Brain directs attention |
-| `BLINK` | Single blink | Brain triggered blink |
-| `DART:x,y` | Sharp snap to position | Sudden stimulus response |
-| `PRESENCE:1` | Transition to alert, look toward sensor | PIR fires |
-| `PRESENCE:0` | Transition to sleepy over 30 seconds | PIR clears |
+| `behavior.target_expression` | str | Expression to display: normal, alert, angry, sleepy, thinking |
+| `behavior.target_gaze_x/y` | int | Gaze target position (used with dart on alert) |
+| `behavior.do_dart` | bool | Flag consumed by main loop to trigger dart animation |
 
-### 4.3 Eye Board Main Loop Pattern
+The main loop reads these each frame and applies them to the eye rendering.
 
-```python
-from machine import UART, Pin
+### 4.2 Expression Map
 
-uart = UART(0, baudrate=9600, tx=Pin(0), rx=Pin(1))
-
-while True:
-    if uart.any():
-        cmd = uart.readline().decode().strip()
-        handle_command(cmd)
-    run_eye_frame()  # blink timers, micro-drift, gaze hold
-    time.sleep(0.033)
-```
+| Expression | Eye Appearance | Trigger |
+|---|---|---|
+| `normal` | Blue iris, normal pupil, idle behavior | Default state |
+| `alert` | Cyan iris, dilated pupil | PIR detects presence |
+| `angry` | Red iris, contracted pupil | Raised voice or command |
+| `sleepy` | Dark blue, small pupil, slow blink | Inactivity timeout |
+| `thinking` | Iris dims, pupil contracts, gaze up-left | API call in progress |
 
 ---
 
@@ -355,27 +335,28 @@ while True:
 
 ## 6. File Structure
 
-### 6.1 Brain Board (Pico W)
+### 6.1 Pico W (all code on one board)
+
+Directory: `pico_w/`
 
 | File | Purpose | Status |
 |---|---|---|
-| `main.py` | Boot, WiFi, event loop, sensor polling, UART tx to eyes | To build |
-| `config.json` | WiFi, API key, personality, assistant name | Exists — working |
-| `api.py` | Claude API call handler, system prompt injection | To build |
-| `sensors.py` | PIR, ultrasonic, MPU6050 polling module | To build |
-| `motors.py` | Servo yaw and stepper pitch control | To build |
-| `uart_tx.py` | Send commands to eye board over UART | To build |
-| `audio.py` | PWM audio output via 2N3055 to speakers | To build |
-| `behavior.py` | State machine — idle, alert, interacting, sleeping | To build |
+| `main.py` | Unified loop: sensor polling, behavior, eye animations, rendering at ~30fps | Built |
+| `eye.py` | draw_eye(), fill_ellipse(), color constants, expression map. Pure rendering. | Built |
+| `animations.py` | blink(), glance(), dart(), micro_drift(), slow_look_down(). Stateless. | Built |
+| `sensors.py` | PIR (GP22), ultrasonic (GP26/27) polling | Built |
+| `behavior.py` | State machine — idle, alert, interacting, sleeping. Sets eye state directly. | Built |
+| `config.json` | WiFi, API key, personality, assistant name | Exists — on device |
+| `api.py` | Claude API call handler, system prompt injection | To build (Phase 4) |
+| `motors.py` | Servo yaw and stepper pitch control | To build (Phase 3) |
+| `audio.py` | PWM audio output via 2N3055 to speakers | To build (Phase 4) |
 
-### 6.2 Eye Board (Pico LiPo)
+### 6.2 Retired
 
-| File | Purpose | Status |
-|---|---|---|
-| `main.py` | Eye animation loop, UART rx command handler | Partially working |
-| `eye.py` | draw_eye(), fill_ellipse(), all rendering functions | Working — extract from main.py |
-| `animations.py` | blink(), glance(), dart(), micro_drift(), expressions | Working — extract from main.py |
-| `uart_rx.py` | Receive and parse commands from brain board | To build |
+| Directory | Notes |
+|---|---|
+| `brain_board/` | Superseded by unified `pico_w/` — kept for reference |
+| `eye_board/` | Superseded by unified `pico_w/` — kept for reference |
 
 ---
 
@@ -492,7 +473,7 @@ Each module is tested independently in Thonny REPL before integration:
 | Fixed font size | MicroPython default font is 8x8px fixed. 16 chars max per line. | Any text display |
 | `urequests` not `requests` | MicroPython HTTP library is urequests. | API calls |
 | No async/await | MicroPython does not support async/await. Use polling loops. | Architecture |
-| UART not WiFi for inter-board | Brain to eye communication must be UART. WiFi adds latency. | Communication |
+| Single board | Brain + display run on one Pico W. No UART, no second board. | Architecture |
 | No pip install | All libraries must be in Pimoroni firmware or copied to device. | Dependencies |
 
 ---
