@@ -43,14 +43,14 @@ The head is not a toy and not a novelty. It is a physical AI agent with personal
 | Board | Pimoroni Pico LiPo (RP2040, same pinout as Pico) |
 | Firmware | Pimoroni MicroPython v1.27.0 — picolipo_4mb build |
 | Carrier | Pimoroni Pico Omnibus (dual expander) |
-| Display 1 | Pimoroni Pico Display Pack — 240x135 IPS LCD, ST7789, working on Deck 2 (BL=Pin(20)) |
+| Display 1 | Pimoroni Pico Display Pack — 240x135 IPS LCD, ST7789, working on Deck 1 (BL=Pin(20)) |
 | Display 2 | Pimoroni Pico Display Pack — confirmed dead, replacement ordered |
 | Library | PicoGraphics — no ellipse method, use fill_ellipse() with rectangle rows |
 | Role | Both eye displays, blinking, gaze, expressions, receives commands via UART from brain |
 
 > **CRITICAL: PicoGraphics does not have an ellipse() method. All ellipses must be drawn using fill_ellipse() which iterates y rows and calls display.rectangle(). This is proven working. Do not attempt display.ellipse() — it will throw AttributeError.**
 
-> **PHASE 1 NOTE: Only one display is functional (Deck 2, BL=Pin(20)) — this serves as the right eye. Phase 1 targets single-eye operation only. When the replacement Display Pack arrives, dual-eye support will be added by initializing a second PicoGraphics instance on Deck 1 and mirroring the render output (with gaze_x inverted for the left eye). The Omnibus expander already provides the second SPI bus — no additional wiring needed.**
+> **PHASE 1 NOTE: Only one display is functional (Deck 1, BL=Pin(20)) — this serves as the right eye. Phase 1 targets single-eye operation only. When the replacement Display Pack arrives, dual-eye support will be added by initializing a second PicoGraphics instance on Deck 2 and mirroring the render output (with gaze_x inverted for the left eye). The Omnibus expander already provides the second SPI bus — no additional wiring needed.**
 
 ### 2.3 Sensors (on Brain Board)
 
@@ -490,7 +490,7 @@ Each module is tested independently in Thonny REPL before integration:
 |---|---|---|
 | No `ellipse()` in PicoGraphics | Method does not exist. Use `fill_ellipse()` with rectangle rows. | Eye rendering |
 | 264KB RAM on Pico W | Cap API responses at 100 max_tokens. No large buffers. | API integration |
-| Single working display | Only Deck 2 (BL=Pin(20)) is functional. Second display dead. | Eye system |
+| Single working display | Only Deck 1 (BL=Pin(20)) is functional. Second display dead. | Eye system |
 | Fixed font size | MicroPython default font is 8x8px fixed. 16 chars max per line. | Any text display |
 | `urequests` not `requests` | MicroPython HTTP library is urequests. | API calls |
 | No async/await | MicroPython does not support async/await. Use polling loops. | Architecture |

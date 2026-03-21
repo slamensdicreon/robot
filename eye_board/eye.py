@@ -2,7 +2,7 @@ from picographics import PicoGraphics, DISPLAY_PICO_DISPLAY
 from machine import Pin, PWM
 import math
 
-# Backlight — BL pin confirmed as Pin(20) for working display (Deck 2)
+# Backlight — BL pin confirmed as Pin(20) for working display (Deck 1)
 bl = PWM(Pin(20))
 bl.freq(1000)
 bl.duty_u16(65535)
