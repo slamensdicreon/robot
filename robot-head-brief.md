@@ -50,6 +50,8 @@ The head is not a toy and not a novelty. It is a physical AI agent with personal
 
 > **CRITICAL: PicoGraphics does not have an ellipse() method. All ellipses must be drawn using fill_ellipse() which iterates y rows and calls display.rectangle(). This is proven working. Do not attempt display.ellipse() — it will throw AttributeError.**
 
+> **PHASE 1 NOTE: Only one display is functional (Deck 2, BL=Pin(20)) — this serves as the right eye. Phase 1 targets single-eye operation only. When the replacement Display Pack arrives, dual-eye support will be added by initializing a second PicoGraphics instance on Deck 1 and mirroring the render output (with gaze_x inverted for the left eye). The Omnibus expander already provides the second SPI bus — no additional wiring needed.**
+
 ### 2.3 Sensors (on Brain Board)
 
 | Sensor | Description | GPIO |
@@ -73,7 +75,17 @@ The head is not a toy and not a novelty. It is a physical AI agent with personal
 | Speakers | 2x 8 ohm 0.5W — mounted inside skull |
 | Amplifier | 2N3055 power transistor — PWM audio from Pico W |
 | Optional upgrade | MAX98357A I2S DAC — cleaner audio, ~$4, not yet purchased |
-| TTS source | Claude API or ElevenLabs — server-side generation, streamed to device |
+| TTS source | **TBD** — see decision matrix below |
+
+> **Audio/TTS Decision (must resolve before Phase 4):**
+>
+> | Option | Pros | Cons | Status |
+> |---|---|---|---|
+> | A: PWM via 2N3055 | No extra hardware, already have transistor | Very rough audio quality, limited to tones/beeps | Available now |
+> | B: MAX98357A I2S DAC | Clean digital audio, simple I2S interface | ~$4, not yet purchased, requires I2S code path | Not purchased |
+> | C: Server-side TTS (ElevenLabs/Claude) streamed as WAV | Highest quality voice output | Requires WiFi for every utterance, streaming protocol TBD, RAM-constrained playback | Requires server |
+>
+> **Recommendation**: Option B + C combined — use I2S DAC for playback, server-side TTS for generation. Decision deferred until Phase 4.
 
 ### 2.6 Physical
 
@@ -260,8 +272,8 @@ The brain (Pico W) and eye controller (Pico LiPo) communicate over UART. The bra
 
 | Connection | Pins |
 |---|---|
-| Brain TX | Pico W GP8 → Eye board RX (GP1 on Pico LiPo) |
-| Brain RX | Pico W GP9 → Eye board TX (GP0 on Pico LiPo) |
+| Brain TX | Pico W GP12 (UART1 TX) → Eye board RX (GP1 on Pico LiPo) |
+| Brain RX | Pico W GP13 (UART1 RX) → Eye board TX (GP0 on Pico LiPo) |
 | Shared GND | Common ground between both boards required |
 | Baud rate | 9600 |
 
@@ -328,7 +340,14 @@ while True:
 - Response received — eyes return to normal, head straightens
 - Audio response plays via speaker
 
-### 5.5 Inactivity (no presence for 5 minutes)
+### 5.5 Physical Interaction (MPU6050 detects motion)
+- MPU6050 polls accelerometer at 10Hz on brain board
+- **Tap detected** (sharp acceleration spike): eyes dart to center, alert expression, head straightens — Rudy reacts as if startled
+- **Shake detected** (sustained irregular acceleration): eyes shift to angry expression, Rudy may respond with an annoyed quip via Claude API
+- **Tilt detected** (steady orientation change): eyes follow tilt direction with gaze offset — gives the impression Rudy is aware of his own orientation
+- Thresholds tuned during Phase 3 with physical testing
+
+### 5.6 Inactivity (no presence for 5 minutes)
 - Eyes slowly transition to sleepy expression
 - Blink rate drops to every 8-12 seconds
 - Head slowly droops forward on stepper
@@ -391,11 +410,49 @@ Assistant name: **Rudy**
 ## 8. Implementation Phases
 
 ### Phase 1 — Refactor Eye Board (Start Here)
-- Extract `eye.py` and `animations.py` from working `main.py`
-- Add `uart_rx.py` that polls UART and calls `handle_command()`
-- Implement all commands from Section 4.2
-- Test each command via Thonny console before wiring UART
-- Save as `main.py` so eye board boots autonomously
+
+> **This is the first phase of development. It must be complete and testable before any brain board work begins.**
+
+#### 1a. Module Responsibilities
+
+| File | Responsibility | Imports |
+|---|---|---|
+| `eye.py` | `fill_ellipse()`, `draw_eye()`, color constants (`BLACK`, `WHITE`, `BLUE`, etc.), expression color map. Pure rendering — no state, no timers. | `picographics`, `math` |
+| `animations.py` | `blink()`, `double_blink()`, `glance()`, `dart()`, `micro_drift()`. Stateless animation sequences — each function takes current state as arguments and calls `draw_eye()`. | `eye`, `time`, `random` |
+| `uart_rx.py` | UART initialization, `poll_uart()` returns a parsed command tuple or `None`, `handle_command(cmd)` dispatches to expression changes / gaze / blink actions. | `machine.UART`, `machine.Pin` |
+| `main.py` | Boot sequence (backlight, display init), main loop at ~30fps, UART polling every frame, idle behavior timers. This is the only file with state and timers. | `eye`, `animations`, `uart_rx`, `time`, `random` |
+
+#### 1b. Eye Board Autonomous Idle Behavior
+
+The eye board must run a complete idle animation loop **without any brain commands**. On power-up with no UART connected, the eye should appear alive:
+
+- **Blink**: Random single blink every 1.5–4 seconds. 20% chance of double blink instead.
+- **Gaze shift**: Smooth `glance()` to a random position every 2–5 seconds. Gaze range: x ∈ [-25, 25], y ∈ [-20, 20].
+- **Micro-drift**: Subtle `micro_drift()` runs between gaze shifts — every 1–2 seconds.
+- **Occasional slow look**: 10% chance per gaze shift of a slow downward look followed by return to center.
+- **All timers** use `time.ticks_ms()` comparisons — no `async`, no threading. Each timer stores its next fire time and is checked in the main loop.
+
+#### 1c. Expression Transitions
+
+- Expression changes (via `EXP:` command or internal state) are **instant** — iris color and pupil size switch immediately on the next `draw_eye()` call. No color interpolation (saves RAM and avoids complexity).
+- Gaze position changes use `glance()` for smooth interpolated movement (already implemented).
+- `DART:` commands use the existing `dart()` function for a sharp snap with settle.
+
+#### 1d. UART Error Handling
+
+- **Malformed data**: If `uart.readline()` returns non-decodable bytes or an unrecognized command format, silently discard and continue current state.
+- **Unknown commands**: Ignore — do not crash or log (no serial debug output in production to avoid UART conflicts).
+- **No acknowledgment protocol**: Brain sends fire-and-forget commands. Eye board never sends responses (UART is one-directional in Phase 1).
+- **Non-blocking**: Eye board never blocks on UART. `uart.any()` is checked once per frame — if no data, continue animation.
+
+#### 1e. Testing Strategy
+
+Each module is tested independently in Thonny REPL before integration:
+
+1. **`eye.py`** — Call `draw_eye(0, 0, 0, "normal")`, then cycle through each expression (`"alert"`, `"angry"`, `"sleepy"`, `"thinking"`). Verify iris color and pupil size visually on display.
+2. **`animations.py`** — Call `blink()`, `double_blink()`, `glance(0, 0, 20, 10)`, `dart(25, 0)`, `micro_drift(0, 0)` one at a time. Verify timing and smoothness.
+3. **`uart_rx.py`** — With a second Pico or USB-UART adapter, send test commands: `uart.write(b"EXP:alert\n")`, `uart.write(b"GAZE:10,5\n")`, `uart.write(b"BLINK\n")`. Verify each triggers the correct action. Send garbage bytes and verify no crash.
+4. **`main.py`** — Run the full loop with no UART connected. Verify the eye blinks, glances, and drifts autonomously for 5+ minutes without error. Then connect UART and verify commands override idle behavior correctly.
 
 ### Phase 2 — Brain Board Sensors
 - Build `sensors.py` — PIR, ultrasonic, DHT11 polling
@@ -403,10 +460,12 @@ Assistant name: **Rudy**
 - Build `behavior.py` state machine — idle, alert, interacting, sleeping
 - Confirm state transitions trigger correct UART commands to eye board
 
-### Phase 3 — Brain Board Motors
+### Phase 3 — Brain Board Motors + MPU6050
 - Build `motors.py` — servo yaw control with smooth easing
 - Build stepper pitch control via ULN2003 driver
 - Map behavior states to head positions
+- Integrate MPU6050 — tap, shake, and tilt detection with tuned thresholds
+- Map MPU6050 events to behavior reactions (Section 5.5)
 - Test full movement range before mounting in skull
 
 ### Phase 4 — Audio
@@ -440,7 +499,21 @@ Assistant name: **Rudy**
 
 ---
 
-## 10. Success Criteria
+## 10. Error Recovery
+
+> **Both boards must handle failures gracefully without manual intervention.**
+
+| Failure | Recovery Behavior |
+|---|---|
+| **WiFi drop** (brain) | Brain retries WiFi connection every 10 seconds. Eyes continue autonomous idle — they don't depend on WiFi. |
+| **Claude API failure** (brain) | Brain falls back to 3–5 canned responses stored in `config.json`. Eyes return to normal expression after 5-second timeout. |
+| **UART corruption** (eye board) | Eye board silently discards malformed data and continues current state (see Phase 1, Section 1d). |
+| **Power cycle** (either board) | Both boards boot directly into `main.py` autonomous idle loop. No manual setup required. Target: operational within 3 seconds of power-on. |
+| **Sensor failure** (brain) | Brain logs error internally, skips that sensor in polling loop. Other sensors and behaviors continue normally. |
+
+---
+
+## 11. Success Criteria
 
 Phase 1 through 5 are complete when all of the following are true:
 
