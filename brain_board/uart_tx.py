@@ -1,7 +1,7 @@
 from machine import UART, Pin
 
 # Brain board UART — GP12 TX, GP13 RX (UART1 on Pico W)
-uart = UART(1, baudrate=9600, tx=Pin(12), rx=Pin(13))
+uart = UART(0, baudrate=9600, tx=Pin(12), rx=Pin(13))
 
 
 def send(cmd):
