@@ -12,6 +12,7 @@ ALERT_GREET_MS = 3 * 1000            # 3s sustained presence → greet
 PROXIMITY_INTERACT_MS = 5 * 1000     # 5s sustained proximity → interact
 INTERACT_TIMEOUT_MS = 5 * 1000       # 5s max for API call before timeout
 PROXIMITY_THRESHOLD_CM = 40          # <40cm triggers proximity reaction
+PIR_GRACE_MS = 3 * 1000             # Stay alert 3s after last PIR trigger
 
 # --- State machine ---
 state = STATE_IDLE
@@ -19,6 +20,7 @@ state_entered_at = time.ticks_ms()
 presence_start = 0
 proximity_start = 0
 interaction_start = 0
+last_pir_time = 0
 
 # --- Eye state (set directly by behavior, read by main loop) ---
 target_expression = "normal"
@@ -62,9 +64,13 @@ def tick(pir, distance_cm):
     Returns:
         str or None — "greet" or "interact" if Claude API call needed
     """
-    global presence_start, proximity_start, interaction_start
+    global presence_start, proximity_start, interaction_start, last_pir_time
 
     api_action = None
+
+    # Track last time PIR fired
+    if pir:
+        last_pir_time = time.ticks_ms()
 
     # --- SLEEPING ---
     if state == STATE_SLEEPING:
@@ -82,7 +88,7 @@ def tick(pir, distance_cm):
 
     # --- ALERT ---
     elif state == STATE_ALERT:
-        if not pir:
+        if not pir and _ms_since(last_pir_time) > PIR_GRACE_MS:
             _enter(STATE_IDLE)
         else:
             if _ms_since(presence_start) > ALERT_GREET_MS:
