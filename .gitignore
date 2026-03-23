@@ -1,0 +1,2 @@
+# Secrets — config.json lives only on the Pico W device
+pico_w/config.json

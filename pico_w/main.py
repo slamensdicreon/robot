@@ -1,9 +1,12 @@
 import time
 import random
+import gc
 from eye import draw_eye
 import animations
 import sensors
 import behavior
+import api
+import audio
 
 # --- Polling intervals (ms) ---
 PIR_INTERVAL = 100
@@ -39,7 +42,16 @@ drift_deadline = ticks_add(now, random_interval(1000, 2000))
 pir_detected = False
 distance_cm = None
 
+# --- Speech state ---
+speaking = False
+
 print("Pico W starting — single board mode")
+
+# --- Boot: WiFi + Audio ---
+config = api.load_config()
+wifi_ok = api.connect_wifi(config)
+audio.init_audio(2)  # GP2 for PWM audio through 2N3055
+print("Free RAM after boot:", gc.mem_free())
 
 # Initial frame
 draw_eye(gaze_x, gaze_y, 0, expression)
@@ -61,14 +73,55 @@ while True:
             distance_cm = None
         ultrasonic_deadline = ticks_add(ticks_ms(), ULTRASONIC_INTERVAL)
 
+    # --- If speaking, render eyes + check completion, skip everything else ---
+    if speaking:
+        if not audio.is_playing():
+            speaking = False
+            behavior.interaction_done()
+            gc.collect()
+        else:
+            # Occasional blink during speech
+            if ticks_past(blink_deadline):
+                animations.blink(gaze_x, gaze_y, expression)
+                blink_deadline = ticks_add(ticks_ms(), random_interval(2000, 5000))
+        draw_eye(gaze_x, gaze_y, 0, expression)
+        time.sleep(0.033)
+        continue
+
     # --- Behavior state machine ---
     api_action = behavior.tick(pir_detected, distance_cm)
 
     if api_action is not None:
-        # TODO Phase 4: Call Claude API here
-        print("API action:", api_action)
-        time.sleep(1)
-        behavior.interaction_done()
+        # Eyes show "thinking" (set by behavior entering INTERACTING)
+        expression = "thinking"
+        draw_eye(-15, -10, 0, expression)
+
+        # Step 1: Get text from Claude
+        text = None
+        if api.check_wifi() or api.reconnect_wifi(config):
+            text = api.call_claude(api_action, config)
+        if text is None:
+            text = "Hello there."
+
+        # Quick blink between API calls — keeps eyes alive
+        animations.blink(-15, -10, "thinking")
+
+        # Step 2: Get audio from ElevenLabs
+        audio_data = api.call_elevenlabs(text, config)
+
+        if audio_data is not None and len(audio_data) > 0:
+            # Step 3: Start playback (non-blocking — timer ISR handles it)
+            expression = "normal"
+            gaze_x = 0
+            gaze_y = 0
+            audio.play_buffer(audio_data)
+            speaking = True
+        else:
+            # No audio — pause briefly and return to idle
+            print("Speech skipped — no audio data")
+            time.sleep(1)
+            behavior.interaction_done()
+            gc.collect()
 
     # --- Apply behavior state to eye ---
     expression = behavior.target_expression

@@ -70,20 +70,26 @@ The head is not a toy and not a novelty. It is a physical AI agent with personal
 
 | Field | Value |
 |---|---|
-| Speakers | 2x 8 ohm 0.5W — mounted inside skull |
-| Amplifier | 2N3055 power transistor — PWM audio from Pico W |
-| Optional upgrade | MAX98357A I2S DAC — cleaner audio, ~$4, not yet purchased |
-| TTS source | **TBD** — see decision matrix below |
+| Speaker | 1x 8 ohm 0.5W — mounted inside skull |
+| Amplifier | None — speaker driven directly from GP2 (loud enough without transistor) |
+| Audio GPIO | GP2 (PWM output direct to speaker) |
+| TTS source | ElevenLabs API — mu-law 8kHz (ulaw_8000 format) |
+| TTS model | eleven_turbo_v2_5 — low latency |
+| Playback | Timer ISR at 8kHz, mu-law decoded via 256-byte lookup table |
+| PWM carrier | 62.5kHz — above audible range, speaker acts as natural low-pass filter |
 
-> **Audio/TTS Decision (must resolve before Phase 4):**
+> **Audio Decision (RESOLVED):**
+> Chose Option A+C: PWM direct to speaker for hardware output, ElevenLabs cloud TTS for voice generation.
+> Audio is buffered entirely in RAM before playback (~24-40KB for a 2-sentence response).
+> The 8kHz mu-law format keeps data size manageable within the 264KB RAM constraint.
 >
-> | Option | Pros | Cons | Status |
-> |---|---|---|---|
-> | A: PWM via 2N3055 | No extra hardware, already have transistor | Very rough audio quality, limited to tones/beeps | Available now |
-> | B: MAX98357A I2S DAC | Clean digital audio, simple I2S interface | ~$4, not yet purchased, requires I2S code path | Not purchased |
-> | C: Server-side TTS (ElevenLabs/Claude) streamed as WAV | Highest quality voice output | Requires WiFi for every utterance, streaming protocol TBD, RAM-constrained playback | Requires server |
->
-> **Recommendation**: Option B + C combined — use I2S DAC for playback, server-side TTS for generation. Decision deferred until Phase 4.
+> **Speaker Wiring:**
+> ```
+> GP2 → Speaker (+)
+> GND → Speaker (-)
+> ```
+> No amplifier needed — the 0.5W speaker is loud enough driven directly from GPIO PWM.
+> The 2N3055 transistor circuit was tested but unnecessary.
 
 ### 2.6 Physical
 
@@ -346,10 +352,11 @@ Directory: `pico_w/`
 | `animations.py` | blink(), glance(), dart(), micro_drift(), slow_look_down(). Stateless. | Built |
 | `sensors.py` | PIR (GP22), ultrasonic (GP26/27) polling | Built |
 | `behavior.py` | State machine — idle, alert, interacting, sleeping. Sets eye state directly. | Built |
-| `config.json` | WiFi, API key, personality, assistant name | Exists — on device |
-| `api.py` | Claude API call handler, system prompt injection | To build (Phase 4) |
+| `config.json` | WiFi, API keys (Claude + ElevenLabs), personality, voice_id, fallbacks | On device |
+| `api.py` | WiFi connection, Claude API, ElevenLabs TTS client. Raw socket for binary audio. | Built |
+| `audio.py` | PWM audio engine: mu-law decode table, Timer ISR at 8kHz, play/stop. | Built |
+| `test_audio.py` | Speaker test: 440Hz sine wave tone to verify 2N3055 circuit | Built |
 | `motors.py` | Servo yaw and stepper pitch control | To build (Phase 3) |
-| `audio.py` | PWM audio output via 2N3055 to speakers | To build (Phase 4) |
 
 ### 6.2 Retired
 
@@ -447,11 +454,15 @@ Each module is tested independently in Thonny REPL before integration:
 - Map MPU6050 events to behavior reactions (Section 5.5)
 - Test full movement range before mounting in skull
 
-### Phase 4 — Audio
-- Build `audio.py` — PWM audio output via 2N3055
-- Test speaker output with a simple tone first
-- Integrate with Claude API — receive text, generate audio server-side
-- Stream audio chunks to Pico W, play via speaker
+### Phase 4 — Audio ✅
+- Built `audio.py` — PWM playback engine with mu-law decode table, Timer ISR at 8kHz
+- Built `api.py` — WiFi management, Claude API client, ElevenLabs TTS via raw sockets
+- Built `test_audio.py` — 440Hz tone test for speaker circuit verification
+- Modified `main.py` — integrated speech pipeline (thinking eyes → Claude → ElevenLabs → speak)
+- Modified `behavior.py` — extended interaction timeout to 15s for API + playback
+- Speaker wiring: GP2 direct to 8Ω 0.5W speaker (no transistor needed)
+- Audio format: ElevenLabs ulaw_8000 (8kHz mu-law, ~8KB/sec, fits in RAM)
+- Graceful degradation: fallback responses on API failure, skip speech on audio failure
 
 ### Phase 5 — Integration
 - Wire brain board to eye board via UART
