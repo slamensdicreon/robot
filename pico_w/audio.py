@@ -6,6 +6,7 @@ Transistor switches speaker current from VSYS (5V) for louder output.
 """
 
 from machine import Pin, PWM, Timer
+from array import array
 
 # --- Playback state (module-level, accessed by ISR) ---
 _pwm = None
@@ -15,14 +16,18 @@ _pos = 0
 _length = 0
 _playing = False
 
-# --- Mu-law to 8-bit linear PCM lookup table ---
-# Built once at init, used by ISR for zero-allocation decoding
+# --- Mu-law to 16-bit PWM duty lookup table ---
+# 256 entries of unsigned 16-bit values, used by ISR for zero-allocation decoding.
+# 16-bit table avoids the precision loss of 8-bit + shift, reducing static.
 ULAW_TABLE = None
+
+# Volume gain: 1.0 = normal, 2.0 = double amplitude, etc.
+_VOLUME_GAIN = 3.0
 
 
 def _build_ulaw_table():
-    """Build 256-entry mu-law to unsigned 8-bit linear PCM table (ITU-T G.711)."""
-    table = bytearray(256)
+    """Build 256-entry mu-law to 16-bit unsigned PWM duty table (ITU-T G.711)."""
+    table = array('H', [0] * 256)  # unsigned 16-bit array
     for i in range(256):
         # Complement the bits (mu-law is stored complemented)
         val = ~i & 0xFF
@@ -32,21 +37,23 @@ def _build_ulaw_table():
         # Decode to 14-bit linear magnitude
         magnitude = ((mantissa << 1) + 33) << (exponent + 2)
         magnitude -= 33
-        # Clamp to 14-bit range
         if magnitude > 8191:
             magnitude = 8191
-        # Scale signed 14-bit (-8191..8191) to unsigned 8-bit (0..255)
+        # Apply volume gain to magnitude before scaling
+        magnitude = int(magnitude * _VOLUME_GAIN)
+        if magnitude > 8191:
+            magnitude = 8191
+        # Scale signed 14-bit to unsigned 16-bit (0..65535) for PWM duty
+        # Center at 32768 (50% duty = silence)
         if sign:
-            # Negative: 0..127
-            scaled = 128 - (magnitude >> 6)
+            scaled = 32768 - (magnitude << 2)
         else:
-            # Positive: 128..255
-            scaled = 128 + (magnitude >> 6)
-        # Clamp
+            scaled = 32768 + (magnitude << 2)
+        # Clamp to valid PWM range
         if scaled < 0:
             scaled = 0
-        elif scaled > 255:
-            scaled = 255
+        elif scaled > 65535:
+            scaled = 65535
         table[i] = scaled
     return table
 
@@ -55,8 +62,7 @@ def _isr(timer):
     """Timer ISR — plays one sample per call at 8kHz. No allocations."""
     global _pos, _playing
     if _pos < _length:
-        sample = ULAW_TABLE[_buf[_pos]]
-        _pwm.duty_u16(sample << 8)
+        _pwm.duty_u16(ULAW_TABLE[_buf[_pos]])
         _pos += 1
     else:
         _pwm.duty_u16(0)

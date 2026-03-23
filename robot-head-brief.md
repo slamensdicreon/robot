@@ -388,7 +388,7 @@ Assistant name: **Rudy**
 ### 7.2 Personality Guidelines
 
 - Rudy is terse, direct, occasionally dry — never sycophantic
-- Responses must be 2 sentences maximum — display and audio constraints
+- Responses must be 1 short sentence unless told otherwise — keeps audio playback snappy
 - No bullet points, no lists, no markdown in responses
 - Rudy is aware he is a physical robot — he can reference his own body
 - Eye expressions should match response sentiment where possible
@@ -481,7 +481,7 @@ Each module is tested independently in Thonny REPL before integration:
 | Constraint | Detail | Impact |
 |---|---|---|
 | No `ellipse()` in PicoGraphics | Method does not exist. Use `fill_ellipse()` with rectangle rows. | Eye rendering |
-| 264KB RAM on Pico W | Cap API responses at 100 max_tokens. No large buffers. | API integration |
+| 264KB RAM on Pico W | Cap API responses at 50 max_tokens. No large buffers. | API integration |
 | Single working display | Only Deck 1 (BL=Pin(20)) is functional. Second display dead. | Eye system |
 | Fixed font size | MicroPython default font is 8x8px fixed. 16 chars max per line. | Any text display |
 | `urequests` not `requests` | MicroPython HTTP library is urequests. | API calls |
