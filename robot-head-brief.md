@@ -71,30 +71,46 @@ The head is not a toy and not a novelty. It is a physical AI agent with personal
 | Field | Value |
 |---|---|
 | Speaker | 1x 8 ohm 0.5W — mounted inside skull |
-| Amplifier | 2N3055 transistor — GP2 PWM drives base via 1kΩ resistor, VSYS powers speaker through collector-emitter |
-| Audio GPIO | GP2 (PWM output to transistor base via 1kΩ resistor) |
+| Amplifier | None — direct PWM drive from GP2 (2N3055 removed, cleaner signal without it) |
+| Audio GPIO | GP2 (PWM output direct to speaker) |
 | TTS source | ElevenLabs API — mu-law 8kHz (ulaw_8000 format) |
 | TTS model | eleven_turbo_v2_5 — low latency |
 | Playback | Timer ISR at 8kHz, mu-law decoded via 256-entry 16-bit lookup table |
 | PWM carrier | 31.25kHz — above audible range, 4000-step resolution (125MHz/31.25kHz) |
-| Hardware filter | Recommended: 100Ω + 470nF low-pass between emitter and speaker (~3.4kHz cutoff) |
+| Hardware filter | Recommended: 100Ω + 470nF low-pass between GP2 and speaker(+) (~3.4kHz cutoff) |
 
 > **Audio Decision (RESOLVED):**
 > Chose Option A+C: PWM direct to speaker for hardware output, ElevenLabs cloud TTS for voice generation.
 > Audio is buffered entirely in RAM before playback (~24-40KB for a 2-sentence response).
 > The 8kHz mu-law format keeps data size manageable within the 264KB RAM constraint.
 >
-> **Speaker Wiring (2N3055 transistor circuit):**
+> **Speaker Wiring (direct drive — no amplifier):**
 > ```
-> GP2 → 1kΩ resistor → 2N3055 Base (B)
-> VSYS (5V)          → Collector (C)
-> Emitter (E)        → Speaker (+)
-> Speaker (-)        → GND
+> GP2 → 100Ω + 470nF low-pass → Speaker (+)
+> Speaker (-) → GND
 > ```
-> The 2N3055 transistor amplifies current from VSYS, giving louder output than direct GPIO drive.
-> The 1kΩ resistor limits base current to safe levels for the Pico GPIO pin.
+> Direct GPIO drive produces cleaner audio than the 2N3055 transistor circuit.
+> Volume is lower but signal quality is better — no amplifier static.
 
-### 2.6 Physical
+### 2.6 Mouth (LED Ring)
+
+| Field | Value |
+|---|---|
+| Type | WS2812 (NeoPixel) RGB LED ring |
+| LED count | 16 |
+| Data GPIO | GP3 |
+| Power | 5V (VCC → VSYS), GND → GND |
+| Role | Robot mouth — animates when speaking, breathes when idle, off when sleeping |
+
+> **Mouth Wiring:**
+> ```
+> GP3  → DIN (data in)
+> VSYS → VCC (5V power)
+> GND  → GND
+> ```
+> Uses MicroPython built-in `neopixel` module. No external library needed.
+
+### 2.7 Physical
 
 | Field | Value |
 |---|---|
@@ -358,8 +374,9 @@ Directory: `pico_w/`
 | `behavior.py` | State machine — idle, alert, interacting, sleeping. Sets eye state directly. | Built |
 | `config.json` | WiFi, API keys (Claude + ElevenLabs), personality, voice_id, fallbacks | On device |
 | `api.py` | WiFi connection, Claude API, ElevenLabs TTS client. Raw socket for binary audio. | Built |
-| `audio.py` | PWM audio engine: mu-law decode table, Timer ISR at 8kHz, play/stop. | Built |
-| `test_audio.py` | Speaker test: 440Hz sine wave tone to verify 2N3055 circuit | Built |
+| `audio.py` | PWM audio engine: mu-law decode table, Timer ISR at 8kHz, play/stop. Direct speaker drive. | Built |
+| `mouth.py` | WS2812 LED ring driver — speaking animation, idle breathing, off modes. | Built |
+| `test_audio.py` | Speaker test: 440Hz sine wave tone to verify speaker circuit | Built |
 | `motors.py` | Servo yaw and stepper pitch control | To build (Phase 3) |
 
 ### 6.2 Retired
@@ -464,7 +481,9 @@ Each module is tested independently in Thonny REPL before integration:
 - Built `test_audio.py` — 440Hz tone test for speaker circuit verification
 - Modified `main.py` — integrated speech pipeline (thinking eyes → Claude → ElevenLabs → speak)
 - Modified `behavior.py` — extended interaction timeout to 15s for API + playback
-- Speaker wiring: GP2 → 1kΩ → 2N3055 transistor → 8Ω 0.5W speaker (transistor amplifies current from VSYS)
+- Speaker wiring: GP2 → direct to 8Ω 0.5W speaker (2N3055 removed — cleaner signal without it)
+- Built `mouth.py` — WS2812 LED ring on GP3 as robot mouth with speaking/idle/off animations
+- Modified `main.py` — integrated mouth LED animations synced to speech playback
 - Audio format: ElevenLabs ulaw_8000 (8kHz mu-law, ~8KB/sec, fits in RAM)
 - Graceful degradation: fallback responses on API failure, skip speech on audio failure
 

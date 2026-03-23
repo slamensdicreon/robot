@@ -1,12 +1,10 @@
 """PWM audio playback engine for Pico W.
 
 Plays 8kHz mu-law (G.711) audio through PWM via timer interrupt.
-GP2 PWM drives 2N3055 transistor base via 1kΩ resistor.
-Transistor switches speaker current from VSYS (5V) for louder output.
+GP2 PWM drives 8Ω 0.5W speaker directly (no amplifier).
 
-Hardware filter recommended: 100Ω resistor + 470nF capacitor in series
-between transistor emitter and speaker(+). Low-pass cutoff ~3.4kHz
-removes PWM carrier hash for cleaner voice audio.
+Hardware filter recommended: 100Ω + 470nF low-pass between GP2 and
+speaker(+) (~3.4kHz cutoff) to remove PWM carrier hash.
 """
 
 from machine import Pin, PWM, Timer
@@ -27,7 +25,7 @@ ULAW_TABLE = None
 
 # Volume gain: 1.0 = normal, 1.5 = 50% louder, etc.
 # Keep at or below 2.0 to avoid clipping distortion.
-_VOLUME_GAIN = 1.5
+_VOLUME_GAIN = 2.0
 
 
 def _build_ulaw_table():
@@ -74,7 +72,7 @@ def _isr(timer):
         _pwm.duty_u16(ULAW_TABLE[_buf[_pos]])
         _pos += 1
     else:
-        _pwm.duty_u16(0)
+        _pwm.duty_u16(32768)
         _playing = False
         timer.deinit()
 
@@ -87,9 +85,9 @@ def init_audio(pin_num=2):
     global _pwm, ULAW_TABLE
     _pwm = PWM(Pin(pin_num))
     _pwm.freq(31250)  # 31.25kHz — above audible range, 4000-step resolution
-    _pwm.duty_u16(0)
+    _pwm.duty_u16(32768)  # 50% duty = electrical silence (no speaker current)
     ULAW_TABLE = _build_ulaw_table()
-    print("Audio init: GP{} @ 31.25kHz PWM".format(pin_num))
+    print("Audio init: GP{} @ 31.25kHz PWM (direct speaker)".format(pin_num))
 
 
 def play_buffer(audio_bytes):
@@ -125,4 +123,4 @@ def stop():
     if _timer:
         _timer.deinit()
     if _pwm:
-        _pwm.duty_u16(0)
+        _pwm.duty_u16(32768)

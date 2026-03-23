@@ -7,6 +7,7 @@ import sensors
 import behavior
 import api
 import audio
+import mouth
 
 # --- Polling intervals (ms) ---
 PIR_INTERVAL = 100
@@ -50,7 +51,8 @@ print("Pico W starting — single board mode")
 # --- Boot: WiFi + Audio ---
 config = api.load_config()
 wifi_ok = api.connect_wifi(config)
-audio.init_audio(2)  # GP2 for PWM audio through 2N3055
+audio.init_audio(2)  # GP2 PWM direct to speaker
+mouth.init(3, 16)    # GP3 WS2812 ring, 16 LEDs
 print("Free RAM after boot:", gc.mem_free())
 
 # Initial frame
@@ -75,6 +77,7 @@ while True:
     if speaking:
         if not audio.is_playing():
             speaking = False
+            mouth.set_mode("idle")
             behavior.interaction_done()
             gc.collect()
         else:
@@ -82,6 +85,7 @@ while True:
             if ticks_past(blink_deadline):
                 animations.blink(gaze_x, gaze_y, expression)
                 blink_deadline = ticks_add(ticks_ms(), random_interval(2000, 5000))
+            mouth.update()
         draw_eye(gaze_x, gaze_y, 0, expression)
         time.sleep(0.033)
         continue
@@ -113,6 +117,7 @@ while True:
             gaze_x = 0
             gaze_y = 0
             audio.play_buffer(audio_data)
+            mouth.set_mode("speaking")
             speaking = True
         else:
             # No audio — pause briefly and return to idle
@@ -158,6 +163,14 @@ while True:
         if ticks_past(drift_deadline):
             animations.micro_drift(gaze_x, gaze_y, expression)
             drift_deadline = ticks_add(ticks_ms(), random_interval(1000, 2000))
+
+    # --- Mouth LED (idle breathing when not speaking) ---
+    if not speaking:
+        if behavior.get_state() == behavior.STATE_SLEEPING:
+            mouth.set_mode("off")
+        else:
+            mouth.set_mode("idle")
+        mouth.update()
 
     # --- Render ---
     draw_eye(gaze_x, gaze_y, 0, expression)
