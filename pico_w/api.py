@@ -94,6 +94,8 @@ def call_claude(action, config):
         user_msg = "Someone just walked up to your desk. Greet them briefly."
     elif action == "interact":
         user_msg = "Someone is standing very close to you. React to their presence."
+    elif action == "curious":
+        user_msg = "Something is close to you but it's not a person — maybe a hand, an object, or something weird. React with curiosity."
     else:
         user_msg = "Say something."
 

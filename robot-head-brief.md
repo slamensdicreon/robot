@@ -75,8 +75,9 @@ The head is not a toy and not a novelty. It is a physical AI agent with personal
 | Audio GPIO | GP2 (PWM output to transistor base via 1kΩ resistor) |
 | TTS source | ElevenLabs API — mu-law 8kHz (ulaw_8000 format) |
 | TTS model | eleven_turbo_v2_5 — low latency |
-| Playback | Timer ISR at 8kHz, mu-law decoded via 256-byte lookup table |
-| PWM carrier | 62.5kHz — above audible range, speaker acts as natural low-pass filter |
+| Playback | Timer ISR at 8kHz, mu-law decoded via 256-entry 16-bit lookup table |
+| PWM carrier | 31.25kHz — above audible range, 4000-step resolution (125MHz/31.25kHz) |
+| Hardware filter | Recommended: 100Ω + 470nF low-pass between emitter and speaker (~3.4kHz cutoff) |
 
 > **Audio Decision (RESOLVED):**
 > Chose Option A+C: PWM direct to speaker for hardware output, ElevenLabs cloud TTS for voice generation.
@@ -307,22 +308,23 @@ The main loop reads these each frame and applies them to the eye rendering.
 - Occasional slow look down then back up
 - Head servo makes micro-adjustments — never completely still
 
-### 5.2 Presence Detection (PIR fires)
-- Eyes shift to alert expression — cyan iris, dilated pupil
-- Head servo turns toward PIR sensor direction
-- Ultrasonic begins polling distance every 500ms
-- If presence sustained 3 seconds — trigger greeting via Claude API
+### 5.2 Proximity Detection (ultrasonic — primary trigger)
+- Ultrasonic polls every 500ms continuously (all states except sleeping)
+- When something enters < 40cm — eyes dart to center, alert expression
+- After 1s sustained proximity — check PIR to classify human vs object
+- PIR confirms human → trigger "greet" via Claude API
+- No PIR after 3s → trigger "curious" reaction (object, not person)
+- 10s cooldown after each interaction to prevent re-triggering
 
-### 5.3 Proximity Reaction (ultrasonic < 40cm)
-- Eyes dart to center, stare forward
-- Head tilts back slightly on stepper
-- Expression shifts to alert
-- If proximity sustained 5 seconds — trigger Claude API interaction
+### 5.3 PIR Role (secondary — human classifier)
+- PIR no longer triggers state transitions on its own
+- Used only during ALERT state to confirm a warm body is present
+- Distinguishes a person approaching from an object being placed nearby
 
 ### 5.4 Claude API Interaction
 - Eyes shift to thinking expression — gaze up and left, iris dims
 - Head tilts slightly to one side
-- API call executes on brain board
+- API call with action type: "greet" (human) or "curious" (object)
 - Response received — eyes return to normal, head straightens
 - Audio response plays via speaker
 
