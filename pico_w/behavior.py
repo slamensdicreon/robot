@@ -10,7 +10,7 @@ STATE_SLEEPING = "sleeping"
 SLEEP_TIMEOUT_MS = 5 * 60 * 1000     # 5 minutes idle → sleeping
 ALERT_GREET_MS = 3 * 1000            # 3s sustained presence → greet
 PROXIMITY_INTERACT_MS = 5 * 1000     # 5s sustained proximity → interact
-INTERACT_TIMEOUT_MS = 5 * 1000       # 5s max for API call before timeout
+INTERACT_TIMEOUT_MS = 15 * 1000      # 15s — enough for API calls + speech playback
 PROXIMITY_THRESHOLD_CM = 40          # <40cm triggers proximity reaction
 PIR_GRACE_MS = 3 * 1000             # Stay alert 3s after last PIR trigger
 
