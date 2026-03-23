@@ -71,25 +71,25 @@ The head is not a toy and not a novelty. It is a physical AI agent with personal
 | Field | Value |
 |---|---|
 | Speaker | 1x 8 ohm 0.5W — mounted inside skull |
-| Amplifier | 2N3055 power transistor in emitter-follower config |
-| Audio GPIO | GP2 (PWM output through 1kΩ base resistor) |
+| Amplifier | None — speaker driven directly from GP2 (loud enough without transistor) |
+| Audio GPIO | GP2 (PWM output direct to speaker) |
 | TTS source | ElevenLabs API — mu-law 8kHz (ulaw_8000 format) |
 | TTS model | eleven_turbo_v2_5 — low latency |
 | Playback | Timer ISR at 8kHz, mu-law decoded via 256-byte lookup table |
 | PWM carrier | 62.5kHz — above audible range, speaker acts as natural low-pass filter |
 
 > **Audio Decision (RESOLVED):**
-> Chose Option A+C: PWM via 2N3055 for hardware output, ElevenLabs cloud TTS for voice generation.
+> Chose Option A+C: PWM direct to speaker for hardware output, ElevenLabs cloud TTS for voice generation.
 > Audio is buffered entirely in RAM before playback (~24-40KB for a 2-sentence response).
 > The 8kHz mu-law format keeps data size manageable within the 264KB RAM constraint.
 >
 > **Speaker Wiring:**
 > ```
-> VSYS (5V) → 2N3055 Collector
-> GP2 ──[1kΩ]── → 2N3055 Base
-> 2N3055 Emitter → Speaker (+)
-> Speaker (-) → GND
+> GP2 → Speaker (+)
+> GND → Speaker (-)
 > ```
+> No amplifier needed — the 0.5W speaker is loud enough driven directly from GPIO PWM.
+> The 2N3055 transistor circuit was tested but unnecessary.
 
 ### 2.6 Physical
 
@@ -460,7 +460,7 @@ Each module is tested independently in Thonny REPL before integration:
 - Built `test_audio.py` — 440Hz tone test for speaker circuit verification
 - Modified `main.py` — integrated speech pipeline (thinking eyes → Claude → ElevenLabs → speak)
 - Modified `behavior.py` — extended interaction timeout to 15s for API + playback
-- Speaker wiring: GP2 → 1kΩ → 2N3055 base, emitter-follower to 8Ω 0.5W speaker
+- Speaker wiring: GP2 direct to 8Ω 0.5W speaker (no transistor needed)
 - Audio format: ElevenLabs ulaw_8000 (8kHz mu-law, ~8KB/sec, fits in RAM)
 - Graceful degradation: fallback responses on API failure, skip speech on audio failure
 
