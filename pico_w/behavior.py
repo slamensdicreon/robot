@@ -8,19 +8,18 @@ STATE_SLEEPING = "sleeping"
 
 # --- Timing constants (ms) ---
 SLEEP_TIMEOUT_MS = 5 * 60 * 1000     # 5 minutes idle → sleeping
-ALERT_GREET_MS = 3 * 1000            # 3s sustained presence → greet
-PROXIMITY_INTERACT_MS = 5 * 1000     # 5s sustained proximity → interact
+PROXIMITY_THRESHOLD_CM = 40          # <40cm triggers alert
+PROXIMITY_CONFIRM_MS = 1000          # 1s sustained proximity before checking PIR
+PIR_CHECK_WINDOW_MS = 3000           # 3s to detect PIR after proximity confirmed
 INTERACT_TIMEOUT_MS = 15 * 1000      # 15s — enough for API calls + speech playback
-PROXIMITY_THRESHOLD_CM = 40          # <40cm triggers proximity reaction
-PIR_GRACE_MS = 3 * 1000             # Stay alert 3s after last PIR trigger
+COOLDOWN_MS = 10 * 1000              # 10s after interaction before re-triggering
 
 # --- State machine ---
 state = STATE_IDLE
 state_entered_at = time.ticks_ms()
-presence_start = 0
 proximity_start = 0
 interaction_start = 0
-last_pir_time = 0
+last_interaction_end = 0
 
 # --- Eye state (set directly by behavior, read by main loop) ---
 target_expression = "normal"
@@ -61,50 +60,49 @@ def _ms_since(t):
 def tick(pir, distance_cm):
     """Called each main loop iteration with current sensor readings.
 
+    Primary trigger: ultrasonic detects proximity (< 40cm).
+    Secondary check: PIR confirms human presence (heat signature).
+
     Returns:
-        str or None — "greet" or "interact" if Claude API call needed
+        str or None — "greet" (human), "curious" (object), or None
     """
-    global presence_start, proximity_start, interaction_start, last_pir_time
+    global proximity_start, interaction_start, last_interaction_end
 
     api_action = None
-
-    # Track last time PIR fired
-    if pir:
-        last_pir_time = time.ticks_ms()
+    close = distance_cm is not None and distance_cm < PROXIMITY_THRESHOLD_CM
 
     # --- SLEEPING ---
     if state == STATE_SLEEPING:
-        if pir:
+        if close:
             _enter(STATE_ALERT)
-            presence_start = time.ticks_ms()
+            proximity_start = time.ticks_ms()
 
     # --- IDLE ---
     elif state == STATE_IDLE:
-        if pir:
+        # Check cooldown — don't re-trigger immediately after an interaction
+        if close and _ms_since(last_interaction_end) > COOLDOWN_MS:
             _enter(STATE_ALERT)
-            presence_start = time.ticks_ms()
+            proximity_start = time.ticks_ms()
         elif _ms_since(state_entered_at) > SLEEP_TIMEOUT_MS:
             _enter(STATE_SLEEPING)
 
     # --- ALERT ---
     elif state == STATE_ALERT:
-        if not pir and _ms_since(last_pir_time) > PIR_GRACE_MS:
+        if not close:
+            # Thing moved away — back to idle
             _enter(STATE_IDLE)
-        else:
-            if _ms_since(presence_start) > ALERT_GREET_MS:
+        elif _ms_since(proximity_start) > PROXIMITY_CONFIRM_MS:
+            # Something has been close for 1s — now check PIR
+            if pir:
+                # PIR confirms human — interact
                 _enter(STATE_INTERACTING)
                 interaction_start = time.ticks_ms()
                 api_action = "greet"
-
-            if distance_cm is not None and distance_cm < PROXIMITY_THRESHOLD_CM:
-                if proximity_start == 0:
-                    proximity_start = time.ticks_ms()
-                elif _ms_since(proximity_start) > PROXIMITY_INTERACT_MS:
-                    _enter(STATE_INTERACTING)
-                    interaction_start = time.ticks_ms()
-                    api_action = "interact"
-            else:
-                proximity_start = 0
+            elif _ms_since(proximity_start) > PIR_CHECK_WINDOW_MS:
+                # 3s close but no PIR — it's an object, not a person
+                _enter(STATE_INTERACTING)
+                interaction_start = time.ticks_ms()
+                api_action = "curious"
 
     # --- INTERACTING ---
     elif state == STATE_INTERACTING:
@@ -116,6 +114,8 @@ def tick(pir, distance_cm):
 
 def interaction_done():
     """Call this after the Claude API response has been handled."""
+    global last_interaction_end
+    last_interaction_end = time.ticks_ms()
     _enter(STATE_IDLE)
 
 
