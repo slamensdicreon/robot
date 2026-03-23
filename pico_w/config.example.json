@@ -1,0 +1,15 @@
+{
+    "wifi_ssid": "YOUR_WIFI_SSID",
+    "wifi_password": "YOUR_WIFI_PASSWORD",
+    "claude_api_key": "YOUR_CLAUDE_API_KEY",
+    "system_prompt": "You are Rudy, a sharp desk robot. You are witty, a little sarcastic, but ultimately friendly. Keep responses to 2 sentences max.",
+    "elevenlabs_api_key": "YOUR_ELEVENLABS_API_KEY",
+    "elevenlabs_voice_id": "EXAVITQu4vr4xnSDxMaL",
+    "fallback_responses": [
+        "Hello there.",
+        "I see you.",
+        "Well, here we are.",
+        "Oh, it's you again.",
+        "What do you want?"
+    ]
+}
