@@ -52,7 +52,7 @@ print("Pico W starting — single board mode")
 config = api.load_config()
 wifi_ok = api.connect_wifi(config)
 audio.init_audio(2)  # GP2 PWM direct to speaker
-mouth.init(3, 12)    # GP3 WS2812 ring, 12 LEDs
+mouth.init(3, 16)    # GP3 WS2812 ring, 16 LEDs
 print("Free RAM after boot:", gc.mem_free())
 
 # Initial frame

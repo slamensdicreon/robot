@@ -97,7 +97,7 @@ The head is not a toy and not a novelty. It is a physical AI agent with personal
 | Field | Value |
 |---|---|
 | Type | WS2812 (NeoPixel) RGB LED ring |
-| LED count | 12 (adjustable in code) |
+| LED count | 16 |
 | Data GPIO | GP3 |
 | Power | 5V (VCC → VSYS), GND → GND |
 | Role | Robot mouth — animates when speaking, breathes when idle, off when sleeping |

@@ -12,7 +12,7 @@ import time
 
 # --- Config ---
 MOUTH_PIN = 3
-NUM_LEDS = 12  # Common ring sizes: 8, 12, 16, 24 — adjust to match yours
+NUM_LEDS = 16
 
 # Colors (R, G, B)
 OFF = (0, 0, 0)
