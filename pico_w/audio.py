@@ -3,6 +3,10 @@
 Plays 8kHz mu-law (G.711) audio through PWM via timer interrupt.
 GP2 PWM drives 2N3055 transistor base via 1kΩ resistor.
 Transistor switches speaker current from VSYS (5V) for louder output.
+
+Hardware filter recommended: 100Ω resistor + 470nF capacitor in series
+between transistor emitter and speaker(+). Low-pass cutoff ~3.4kHz
+removes PWM carrier hash for cleaner voice audio.
 """
 
 from machine import Pin, PWM, Timer
@@ -21,12 +25,17 @@ _playing = False
 # 16-bit table avoids the precision loss of 8-bit + shift, reducing static.
 ULAW_TABLE = None
 
-# Volume gain: 1.0 = normal, 2.0 = double amplitude, etc.
-_VOLUME_GAIN = 3.0
+# Volume gain: 1.0 = normal, 1.5 = 50% louder, etc.
+# Keep at or below 2.0 to avoid clipping distortion.
+_VOLUME_GAIN = 1.5
 
 
 def _build_ulaw_table():
-    """Build 256-entry mu-law to 16-bit unsigned PWM duty table (ITU-T G.711)."""
+    """Build 256-entry mu-law to 16-bit unsigned PWM duty table (ITU-T G.711).
+
+    Decodes mu-law to signed linear, applies gain, then scales to 0-65535
+    centered at 32768 (50% duty = electrical silence).
+    """
     table = array('H', [0] * 256)  # unsigned 16-bit array
     for i in range(256):
         # Complement the bits (mu-law is stored complemented)
@@ -34,21 +43,21 @@ def _build_ulaw_table():
         sign = val & 0x80
         exponent = (val >> 4) & 0x07
         mantissa = val & 0x0F
-        # Decode to 14-bit linear magnitude
+        # Decode to 14-bit linear magnitude (0..8191)
         magnitude = ((mantissa << 1) + 33) << (exponent + 2)
         magnitude -= 33
         if magnitude > 8191:
             magnitude = 8191
-        # Apply volume gain to magnitude before scaling
+        # Apply volume gain — clamp to 16383 (leaves headroom for << 1 scaling)
         magnitude = int(magnitude * _VOLUME_GAIN)
-        if magnitude > 8191:
-            magnitude = 8191
-        # Scale signed 14-bit to unsigned 16-bit (0..65535) for PWM duty
-        # Center at 32768 (50% duty = silence)
+        if magnitude > 16383:
+            magnitude = 16383
+        # Scale to unsigned 16-bit centered at 32768
+        # magnitude << 1 maps 0..16383 to 0..32766
         if sign:
-            scaled = 32768 - (magnitude << 2)
+            scaled = 32768 - (magnitude << 1)
         else:
-            scaled = 32768 + (magnitude << 2)
+            scaled = 32768 + (magnitude << 1)
         # Clamp to valid PWM range
         if scaled < 0:
             scaled = 0
@@ -77,10 +86,10 @@ def init_audio(pin_num=2):
     """
     global _pwm, ULAW_TABLE
     _pwm = PWM(Pin(pin_num))
-    _pwm.freq(62500)  # 62.5kHz — well above audible range
+    _pwm.freq(31250)  # 31.25kHz — above audible range, 4000-step resolution
     _pwm.duty_u16(0)
     ULAW_TABLE = _build_ulaw_table()
-    print("Audio init: GP{} @ 62.5kHz PWM".format(pin_num))
+    print("Audio init: GP{} @ 31.25kHz PWM".format(pin_num))
 
 
 def play_buffer(audio_bytes):

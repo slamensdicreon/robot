@@ -75,8 +75,9 @@ The head is not a toy and not a novelty. It is a physical AI agent with personal
 | Audio GPIO | GP2 (PWM output to transistor base via 1kΩ resistor) |
 | TTS source | ElevenLabs API — mu-law 8kHz (ulaw_8000 format) |
 | TTS model | eleven_turbo_v2_5 — low latency |
-| Playback | Timer ISR at 8kHz, mu-law decoded via 256-byte lookup table |
-| PWM carrier | 62.5kHz — above audible range, speaker acts as natural low-pass filter |
+| Playback | Timer ISR at 8kHz, mu-law decoded via 256-entry 16-bit lookup table |
+| PWM carrier | 31.25kHz — above audible range, 4000-step resolution (125MHz/31.25kHz) |
+| Hardware filter | Recommended: 100Ω + 470nF low-pass between emitter and speaker (~3.4kHz cutoff) |
 
 > **Audio Decision (RESOLVED):**
 > Chose Option A+C: PWM direct to speaker for hardware output, ElevenLabs cloud TTS for voice generation.
