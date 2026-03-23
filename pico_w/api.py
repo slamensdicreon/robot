@@ -144,7 +144,10 @@ def call_elevenlabs(text, config):
         memoryview of audio bytes, or None on failure
     """
     import usocket
-    import ussl
+    try:
+        import ussl
+    except ImportError:
+        import ssl as ussl
 
     voice_id = config.get("elevenlabs_voice_id", "pNInz6obpgDQGcFmaJgB")  # Default: Adam
     api_key = config["elevenlabs_api_key"]
