@@ -73,16 +73,21 @@ def tick(pir, distance_cm):
 
     # --- SLEEPING ---
     if state == STATE_SLEEPING:
-        if close:
+        if close or pir:
             _enter(STATE_ALERT)
             proximity_start = time.ticks_ms()
 
     # --- IDLE ---
     elif state == STATE_IDLE:
-        # Check cooldown — don't re-trigger immediately after an interaction
-        if close and _ms_since(last_interaction_end) > COOLDOWN_MS:
+        cooldown_ok = _ms_since(last_interaction_end) > COOLDOWN_MS
+        if close and cooldown_ok:
             _enter(STATE_ALERT)
             proximity_start = time.ticks_ms()
+        elif pir and cooldown_ok:
+            # PIR fallback — ultrasonic may be unavailable or out of range
+            _enter(STATE_INTERACTING)
+            interaction_start = time.ticks_ms()
+            api_action = "greet"
         elif _ms_since(state_entered_at) > SLEEP_TIMEOUT_MS:
             _enter(STATE_SLEEPING)
 

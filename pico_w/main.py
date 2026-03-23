@@ -67,6 +67,8 @@ while True:
 
     if ticks_past(ultrasonic_deadline):
         distance_cm = sensors.poll_ultrasonic()
+        if distance_cm is not None:
+            print("US:{:.0f}cm PIR:{} S:{}".format(distance_cm, pir_detected, behavior.get_state()))
         ultrasonic_deadline = ticks_add(ticks_ms(), ULTRASONIC_INTERVAL)
 
     # --- If speaking, render eyes + check completion, skip everything else ---
