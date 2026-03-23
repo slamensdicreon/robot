@@ -1,7 +1,7 @@
 """WiFi connection, Claude API, and ElevenLabs TTS client for Pico W.
 
 Handles all network operations. Designed for 264KB RAM constraint:
-- Claude responses capped at 100 tokens
+- Claude responses capped at 50 tokens
 - ElevenLabs audio buffer pre-allocated and reused
 - All calls wrapped in try/except for graceful degradation
 """
@@ -105,8 +105,8 @@ def call_claude(action, config):
 
     payload = {
         "model": "claude-haiku-4-5",
-        "max_tokens": 100,
-        "system": config.get("system_prompt", "You are Rudy, a sharp desk robot. 2 sentences max."),
+        "max_tokens": 50,
+        "system": config.get("system_prompt", "You are Rudy, a sharp desk robot. 1 sentence max."),
         "messages": [{"role": "user", "content": user_msg}]
     }
 

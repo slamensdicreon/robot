@@ -71,8 +71,8 @@ The head is not a toy and not a novelty. It is a physical AI agent with personal
 | Field | Value |
 |---|---|
 | Speaker | 1x 8 ohm 0.5W — mounted inside skull |
-| Amplifier | None — speaker driven directly from GP2 (loud enough without transistor) |
-| Audio GPIO | GP2 (PWM output direct to speaker) |
+| Amplifier | 2N3055 transistor — GP2 PWM drives base via 1kΩ resistor, VSYS powers speaker through collector-emitter |
+| Audio GPIO | GP2 (PWM output to transistor base via 1kΩ resistor) |
 | TTS source | ElevenLabs API — mu-law 8kHz (ulaw_8000 format) |
 | TTS model | eleven_turbo_v2_5 — low latency |
 | Playback | Timer ISR at 8kHz, mu-law decoded via 256-byte lookup table |
@@ -83,13 +83,15 @@ The head is not a toy and not a novelty. It is a physical AI agent with personal
 > Audio is buffered entirely in RAM before playback (~24-40KB for a 2-sentence response).
 > The 8kHz mu-law format keeps data size manageable within the 264KB RAM constraint.
 >
-> **Speaker Wiring:**
+> **Speaker Wiring (2N3055 transistor circuit):**
 > ```
-> GP2 → Speaker (+)
-> GND → Speaker (-)
+> GP2 → 1kΩ resistor → 2N3055 Base (B)
+> VSYS (5V)          → Collector (C)
+> Emitter (E)        → Speaker (+)
+> Speaker (-)        → GND
 > ```
-> No amplifier needed — the 0.5W speaker is loud enough driven directly from GPIO PWM.
-> The 2N3055 transistor circuit was tested but unnecessary.
+> The 2N3055 transistor amplifies current from VSYS, giving louder output than direct GPIO drive.
+> The 1kΩ resistor limits base current to safe levels for the Pico GPIO pin.
 
 ### 2.6 Physical
 
@@ -386,7 +388,7 @@ Assistant name: **Rudy**
 ### 7.2 Personality Guidelines
 
 - Rudy is terse, direct, occasionally dry — never sycophantic
-- Responses must be 2 sentences maximum — display and audio constraints
+- Responses must be 1 short sentence unless told otherwise — keeps audio playback snappy
 - No bullet points, no lists, no markdown in responses
 - Rudy is aware he is a physical robot — he can reference his own body
 - Eye expressions should match response sentiment where possible
@@ -460,7 +462,7 @@ Each module is tested independently in Thonny REPL before integration:
 - Built `test_audio.py` — 440Hz tone test for speaker circuit verification
 - Modified `main.py` — integrated speech pipeline (thinking eyes → Claude → ElevenLabs → speak)
 - Modified `behavior.py` — extended interaction timeout to 15s for API + playback
-- Speaker wiring: GP2 direct to 8Ω 0.5W speaker (no transistor needed)
+- Speaker wiring: GP2 → 1kΩ → 2N3055 transistor → 8Ω 0.5W speaker (transistor amplifies current from VSYS)
 - Audio format: ElevenLabs ulaw_8000 (8kHz mu-law, ~8KB/sec, fits in RAM)
 - Graceful degradation: fallback responses on API failure, skip speech on audio failure
 
@@ -479,7 +481,7 @@ Each module is tested independently in Thonny REPL before integration:
 | Constraint | Detail | Impact |
 |---|---|---|
 | No `ellipse()` in PicoGraphics | Method does not exist. Use `fill_ellipse()` with rectangle rows. | Eye rendering |
-| 264KB RAM on Pico W | Cap API responses at 100 max_tokens. No large buffers. | API integration |
+| 264KB RAM on Pico W | Cap API responses at 50 max_tokens. No large buffers. | API integration |
 | Single working display | Only Deck 1 (BL=Pin(20)) is functional. Second display dead. | Eye system |
 | Fixed font size | MicroPython default font is 8x8px fixed. 16 chars max per line. | Any text display |
 | `urequests` not `requests` | MicroPython HTTP library is urequests. | API calls |

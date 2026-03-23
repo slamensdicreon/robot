@@ -1,8 +1,10 @@
 """Speaker test script — generates a 440Hz sine wave and plays it.
 
-Run this on the Pico W with the speaker wired directly:
-  GP2 → Speaker (+)
-  GND → Speaker (-)
+Run this on the Pico W with the transistor circuit:
+  GP2 → 1kΩ resistor → 2N3055 Base
+  VSYS (5V) → Collector
+  Emitter → Speaker (+)
+  Speaker (-) → GND
 
 If you hear a clear 1-second tone, the audio hardware is working.
 """
@@ -29,9 +31,10 @@ for i in range(len(tone)):
     tone[i] = sample
 
 # Patch: play raw PCM directly by temporarily replacing ULAW_TABLE
-# with an identity table (each byte maps to itself)
+# with an identity table (each byte maps to its 16-bit PWM duty value)
 audio.init_audio(2)
-audio.ULAW_TABLE = bytearray(range(256))  # Identity: table[i] = i
+from array import array
+audio.ULAW_TABLE = array('H', [i << 8 for i in range(256)])  # Identity: 8-bit → 16-bit
 
 print("Playing 440Hz tone for 1 second...")
 audio.play_buffer(tone)
