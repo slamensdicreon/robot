@@ -27,7 +27,7 @@ ULAW_TABLE = None
 
 # Volume gain: 1.0 = normal, 1.5 = 50% louder, etc.
 # Keep at or below 2.0 to avoid clipping distortion.
-_VOLUME_GAIN = 1.5
+_VOLUME_GAIN = 2.0
 
 
 def _build_ulaw_table():
@@ -74,7 +74,7 @@ def _isr(timer):
         _pwm.duty_u16(ULAW_TABLE[_buf[_pos]])
         _pos += 1
     else:
-        _pwm.duty_u16(0)
+        _pwm.duty_u16(32768)
         _playing = False
         timer.deinit()
 
@@ -87,7 +87,7 @@ def init_audio(pin_num=2):
     global _pwm, ULAW_TABLE
     _pwm = PWM(Pin(pin_num))
     _pwm.freq(31250)  # 31.25kHz — above audible range, 4000-step resolution
-    _pwm.duty_u16(0)
+    _pwm.duty_u16(32768)  # 50% duty = electrical silence (no speaker current)
     ULAW_TABLE = _build_ulaw_table()
     print("Audio init: GP{} @ 31.25kHz PWM".format(pin_num))
 
@@ -125,4 +125,4 @@ def stop():
     if _timer:
         _timer.deinit()
     if _pwm:
-        _pwm.duty_u16(0)
+        _pwm.duty_u16(32768)
