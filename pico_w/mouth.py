@@ -1,18 +1,22 @@
 """WS2812 RGB LED ring — robot mouth.
 
-Drives a NeoPixel ring on GP3. Animates during speech playback
-to simulate a talking mouth. Call update() each frame from main loop.
+Drives a NeoPixel ring on GP3. Audio-reactive animation during speech —
+samples the live audio buffer to drive LED brightness in sync with the voice.
 
 Wiring: GP3 → DIN, 5V → VCC, GND → GND
 """
 
 from machine import Pin
 from neopixel import NeoPixel
-import time
+import audio
 
 # --- Config ---
 MOUTH_PIN = 3
 NUM_LEDS = 16
+
+# How many audio samples to average per frame (~33ms at 8kHz = 264 samples)
+# We sample a window around the current playback position.
+_WINDOW = 160
 
 # Colors (R, G, B)
 OFF = (0, 0, 0)
@@ -26,8 +30,7 @@ IDLE_ACCENT = (0, 15, 40)
 _np = None
 _frame = 0
 _mode = "off"  # "off", "idle", "speaking"
-# Pseudo-random energy to vary speaking intensity each frame
-_energy = 5
+_smooth_amp = 0.0  # Smoothed amplitude (0.0-1.0)
 
 
 def init(pin_num=MOUTH_PIN, num_leds=NUM_LEDS):
@@ -41,8 +44,9 @@ def init(pin_num=MOUTH_PIN, num_leds=NUM_LEDS):
 
 def clear():
     """Turn all LEDs off."""
-    global _mode
+    global _mode, _smooth_amp
     _mode = "off"
+    _smooth_amp = 0.0
     if _np:
         for i in range(NUM_LEDS):
             _np[i] = OFF
@@ -51,10 +55,11 @@ def clear():
 
 def set_mode(mode):
     """Set animation mode: 'off', 'idle', or 'speaking'."""
-    global _mode, _frame
+    global _mode, _frame, _smooth_amp
     if mode != _mode:
         _mode = mode
         _frame = 0
+        _smooth_amp = 0.0
 
 
 def _scale(color, factor):
@@ -70,69 +75,109 @@ def _add(c1, c2):
     return (min(c1[0] + c2[0], 255), min(c1[1] + c2[1], 255), min(c1[2] + c2[2], 255))
 
 
+def _get_amplitude():
+    """Sample the audio buffer around the current playback position.
+
+    Returns 0.0-1.0 representing current speech loudness.
+    Reads mu-law bytes directly — 0x7F/0xFF are silence (near zero amplitude),
+    values far from those are loud.
+    """
+    buf = audio._buf
+    pos = audio._pos
+    length = audio._length
+    if buf is None or length == 0 or pos >= length:
+        return 0.0
+
+    # Sample a window of bytes centered on current position
+    start = max(0, pos - _WINDOW // 2)
+    end = min(length, pos + _WINDOW // 2)
+
+    # Mu-law: byte value encodes magnitude. 0xFF and 0x7F are near-silence.
+    # Deviation from 0x80 midpoint correlates with amplitude.
+    total = 0
+    count = 0
+    step = 4  # Skip samples for speed
+    for i in range(start, end, step):
+        val = buf[i]
+        # Distance from silence midpoint
+        dev = abs(val - 128)
+        total += dev
+        count += 1
+
+    if count == 0:
+        return 0.0
+
+    # Normalize: max deviation is 127, typical speech peaks ~80-100
+    avg = total / count
+    # Scale so typical speech maps to 0.3-1.0 range
+    amp = avg / 70.0
+    if amp > 1.0:
+        amp = 1.0
+    return amp
+
+
 def update():
     """Advance one animation frame. Call from main loop (~30fps)."""
-    global _frame, _energy
+    global _frame, _smooth_amp
     if _np is None or _mode == "off":
         return
 
     _frame += 1
-    # Simple pseudo-random energy: changes each frame for organic variation
-    _energy = ((_energy * 7 + _frame * 13 + 53) % 100) / 100.0
 
     if _mode == "speaking":
+        # Get real amplitude from audio buffer
+        raw_amp = _get_amplitude()
+        # Smooth: fast attack (track loud sounds instantly), slow decay (fade out)
+        if raw_amp > _smooth_amp:
+            _smooth_amp = _smooth_amp * 0.3 + raw_amp * 0.7  # Fast attack
+        else:
+            _smooth_amp = _smooth_amp * 0.75 + raw_amp * 0.25  # Slow decay
         _update_speaking()
     elif _mode == "idle":
         _update_idle()
 
 
 def _update_speaking():
-    """Dual-comet chase with random intensity bursts — looks alive."""
-    half = NUM_LEDS // 2
+    """Audio-reactive ring: amplitude controls how many LEDs light and how bright."""
+    amp = _smooth_amp
 
-    # Two comets running opposite directions at different speeds
-    pos1 = (_frame // 2) % NUM_LEDS
-    pos2 = (NUM_LEDS - 1 - (_frame // 3)) % NUM_LEDS
+    # Number of lit LEDs scales with amplitude (min 2, max all)
+    lit_count = 2 + int(amp * (NUM_LEDS - 2))
+    half_lit = lit_count // 2
 
-    # Global pulse: fast triangle wave modulated by energy
-    pulse = abs((_frame % 12) - 6) / 6.0
-    intensity = 0.4 + pulse * 0.4 + _energy * 0.2
+    # Rotation gives motion even during sustained sounds
+    rot = (_frame // 2) % NUM_LEDS
 
+    # Color shifts with amplitude: quiet=dim blue, medium=cyan, loud=white
     for i in range(NUM_LEDS):
-        # Distance to each comet (wrapping around ring)
-        d1 = min(abs(i - pos1), NUM_LEDS - abs(i - pos1))
-        d2 = min(abs(i - pos2), NUM_LEDS - abs(i - pos2))
+        # LED position relative to rotation
+        ri = (i + rot) % NUM_LEDS
 
-        # Comet 1: cyan-white, fast
-        if d1 == 0:
-            c1 = _scale(SPEAK_WHITE, intensity)
-        elif d1 == 1:
-            c1 = _scale(SPEAK_CYAN, intensity * 0.7)
-        elif d1 == 2:
-            c1 = _scale(SPEAK_BLUE, intensity * 0.35)
-        elif d1 == 3:
-            c1 = _scale(SPEAK_BLUE, intensity * 0.12)
+        # Distance from center of lit arc (centered at LED 0 after rotation)
+        # Lit LEDs fill symmetrically from the "top"
+        dist_from_center = min(ri, NUM_LEDS - ri)
+
+        if dist_from_center < half_lit:
+            # How far into the lit zone (0.0=edge, 1.0=center)
+            if half_lit > 0:
+                closeness = 1.0 - (dist_from_center / half_lit)
+            else:
+                closeness = 1.0
+
+            brightness = (0.15 + closeness * 0.85) * amp
+
+            # Color blend: louder = more cyan/white
+            if amp > 0.7:
+                color = _scale(SPEAK_WHITE, brightness)
+            elif amp > 0.35:
+                color = _scale(SPEAK_CYAN, brightness)
+            else:
+                color = _scale(SPEAK_BLUE, brightness)
+
+            _np[i] = color
         else:
-            c1 = OFF
-
-        # Comet 2: blue, slower
-        if d2 == 0:
-            c2 = _scale(SPEAK_CYAN, intensity * 0.8)
-        elif d2 == 1:
-            c2 = _scale(SPEAK_BLUE, intensity * 0.5)
-        elif d2 == 2:
-            c2 = _scale(SPEAK_BLUE, intensity * 0.15)
-        else:
-            c2 = OFF
-
-        # Combine both comets + a dim base glow
-        base = _scale(SPEAK_BLUE, 0.04 + _energy * 0.06)
-        _np[i] = _add(_add(c1, c2), base)
-
-    # Sparkle: energy-driven random bright pixel
-    if _energy > 0.6:
-        spark_i = (_frame * 7 + int(_energy * 99)) % NUM_LEDS
-        _np[spark_i] = _scale(SPEAK_WHITE, intensity)
+            # Unlit LEDs get a very dim base glow
+            _np[i] = _scale(SPEAK_BLUE, amp * 0.04)
 
     _np.write()
 
@@ -152,7 +197,6 @@ def _update_idle():
 
     for i in range(NUM_LEDS):
         base = _scale(IDLE_DIM, breath)
-        # Accent: brighter pixel with small tail
         dist = min(abs(i - accent_pos), NUM_LEDS - abs(i - accent_pos))
         if dist == 0:
             accent = _scale(IDLE_ACCENT, breath)
