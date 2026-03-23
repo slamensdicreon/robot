@@ -1,8 +1,10 @@
 """Speaker test script — generates a 440Hz sine wave and plays it.
 
-Run this on the Pico W with the speaker wired directly:
-  GP2 → Speaker (+)
-  GND → Speaker (-)
+Run this on the Pico W with the transistor circuit:
+  GP2 → 1kΩ resistor → 2N3055 Base
+  VSYS (5V) → Collector
+  Emitter → Speaker (+)
+  Speaker (-) → GND
 
 If you hear a clear 1-second tone, the audio hardware is working.
 """

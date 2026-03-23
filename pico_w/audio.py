@@ -1,7 +1,8 @@
 """PWM audio playback engine for Pico W.
 
 Plays 8kHz mu-law (G.711) audio through PWM via timer interrupt.
-Speaker driven directly from GP2 PWM output (no amplifier needed).
+GP2 PWM drives 2N3055 transistor base via 1kΩ resistor.
+Transistor switches speaker current from VSYS (5V) for louder output.
 """
 
 from machine import Pin, PWM, Timer
