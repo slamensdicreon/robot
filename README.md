@@ -27,54 +27,79 @@ For each account, the pipeline:
 5. **Scores with AI** — sends the signals + screenshot to a vision-capable
    Claude model and parses a structured JSON verdict.
 
-Results land in a SQLite store and stream to the dashboard over SSE.
+Results are persisted per account; the dashboard updates each row as its
+assessment returns.
 
-## Quick start
+## Quick start (local)
 
 ```bash
-npm install                 # also downloads Chromium for screenshots
+npm install                 # SQLite + Playwright are optional deps
+npm run setup:browsers      # optional: install Chromium for screenshots
 cp .env.example .env        # add your ANTHROPIC_API_KEY
 npm start                   # http://localhost:3000
 ```
 
-Open the dashboard, click **Add accounts**, paste a CSV (a sample lives in
-`sample-accounts.csv`), then **Assess all**.
+Locally the app uses a SQLite file (no setup). Open the dashboard, click
+**Add accounts**, paste a CSV (a sample lives in `sample-accounts.csv`), then
+**Assess all**.
 
 ### Without an API key or browser
 
-The app still boots. Scoring requires `ANTHROPIC_API_KEY`; if Chromium can't be
+The app still boots. Scoring requires `ANTHROPIC_API_KEY`; if Chromium isn't
 installed, screenshot capture is skipped and the model scores from HTML signals
-alone (logged as `HTML-only` in the capability badge).
+alone (shown as `HTML-only` in the capability badge).
+
+## Deploying to Vercel
+
+The app runs as a single Vercel function (`api/index.js`) with the UI served as
+static assets. Because serverless functions are stateless, the live build uses
+**Postgres** instead of a local SQLite file, the assess endpoint runs
+**synchronously**, and the client orchestrates batches.
+
+1. Import the repo into Vercel (no build command needed; `vercel.json` handles
+   routing and sets `maxDuration`).
+2. Add a Postgres database — **Storage → Create → Postgres** (Vercel Postgres /
+   Neon). This populates `DATABASE_URL` (or `POSTGRES_URL`) automatically; the
+   app accepts either.
+3. Set project environment variables: `ANTHROPIC_API_KEY` (required) and
+   optionally `SERP_API_KEY`.
+4. Deploy. Tables are created on first request.
+
+Screenshots are disabled on Vercel (no headless Chromium), so scoring runs
+HTML-only there.
 
 ## Configuration
 
-All settings live in `.env` (see `.env.example`):
+All settings live in `.env` for local dev (see `.env.example`):
 
 | Variable | Purpose |
 |---|---|
 | `ANTHROPIC_API_KEY` | Scoring model credential (required for scoring) |
 | `SERP_API_KEY` | Optional search-fallback URL resolution |
-| `SCREENSHOT_STORAGE_PATH` | Where JPEGs are written (local path) |
-| `DATABASE_URL` | SQLite file path |
-| `MAX_CONCURRENT_WORKERS` | Batch concurrency (default 5) |
+| `DATABASE_URL` / `POSTGRES_URL` | `postgres://…` → Neon driver; file path → local SQLite |
+| `SCREENSHOT_STORAGE_PATH` | Where JPEGs are written locally (ignored on Vercel) |
 | `FETCH_TIMEOUT_MS` | Per-request fetch timeout |
 | `SCORE_MODEL` | Vision-capable model id |
 
 ## Architecture
 
 ```
+api/index.js       Vercel serverless entry (exports the Express app)
 public/            Dashboard UI (vanilla JS, no build step)
 src/
-  server.js        Express API + SSE
-  pipeline.js      resolve → fetch → score → persist, bounded concurrency
+  app.js           Express app + routes (shared by local + Vercel)
+  server.js        Local dev entry (app.listen)
+  pipeline.js      resolve → fetch → score → persist (one account, synchronous)
   resolver.js      URL resolution (HEAD probe + search fallback)
   fetcher.js       HTML GET, extraction, robots, throttle
   techDetect.js    platform signal detection
-  screenshot.js    Playwright capture (degrades gracefully)
+  screenshot.js    Playwright capture (disabled on serverless)
   scorer.js        Anthropic multimodal scoring + retry
   ingest.js        CSV / pasted-table parsing + dedupe
   export.js        CSV export
-  db.js            SQLite schema + queries
+  db.js            backend dispatcher (postgres | sqlite)
+  db.postgres.js   Neon serverless backend (Vercel)
+  db.sqlite.js     better-sqlite3 backend (local dev)
 ```
 
 ## Not yet implemented (later PRD phases)
