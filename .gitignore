@@ -1,2 +1,10 @@
-# Secrets — config.json lives only on the Pico W device
-pico_w/config.json
+node_modules/
+.env
+*.log
+
+# Local data + captured screenshots
+data/
+screenshots/
+*.sqlite
+*.sqlite-journal
+*.db
