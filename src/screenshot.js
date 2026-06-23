@@ -3,7 +3,8 @@ import path from 'node:path';
 import { config } from './config.js';
 
 let chromiumPromise = null;
-let browserUnavailable = false;
+// Serverless functions can't run Chromium, so don't even load Playwright there.
+let browserUnavailable = Boolean(process.env.VERCEL);
 
 /**
  * Lazily launch a shared headless Chromium. Returns null (once) if Playwright

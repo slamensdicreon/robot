@@ -7,7 +7,8 @@ const ROOT = path.resolve(__dirname, '..');
 
 function resolveLocal(p, fallback) {
   const value = p || fallback;
-  if (value.startsWith('s3://')) return value; // left as-is for future S3 driver
+  // Leave connection strings / remote URIs untouched; only resolve file paths.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return value;
   return path.isAbsolute(value) ? value : path.join(ROOT, value);
 }
 
