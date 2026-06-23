@@ -18,7 +18,12 @@ export const config = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
   serpApiKey: process.env.SERP_API_KEY || '',
   screenshotStoragePath: resolveLocal(process.env.SCREENSHOT_STORAGE_PATH, './screenshots'),
-  databaseUrl: resolveLocal(process.env.DATABASE_URL, './data/assessments.sqlite'),
+  // Vercel's Postgres integration may expose the connection string as
+  // POSTGRES_URL; accept either before falling back to a local SQLite file.
+  databaseUrl: resolveLocal(
+    process.env.DATABASE_URL || process.env.POSTGRES_URL,
+    './data/assessments.sqlite'
+  ),
   maxConcurrentWorkers: Number(process.env.MAX_CONCURRENT_WORKERS) || 5,
   fetchTimeoutMs: Number(process.env.FETCH_TIMEOUT_MS) || 10000,
   scoreModel: process.env.SCORE_MODEL || 'claude-sonnet-4-6',
