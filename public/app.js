@@ -198,17 +198,63 @@ function closeDetail() {
 }
 
 // --- Actions --------------------------------------------------------------
+// The assess endpoint is synchronous: it resolves, fetches, scores, persists,
+// and returns the final { account, assessment }. We merge that into the row.
 async function assessOne(id) {
-  await fetch(`/api/accounts/${id}/assess`, { method: 'POST' });
+  const acct = state.accounts.find((a) => a.id === id);
+  if (acct) { acct.status = 'fetching'; render(); }
+  try {
+    const res = await fetch(`/api/accounts/${id}/assess`, { method: 'POST' });
+    const data = await res.json();
+    mergeResult(id, data);
+  } catch {
+    if (acct) { acct.status = 'failed'; render(); }
+  }
 }
 
+function mergeResult(id, data) {
+  if (!data || !data.account) return;
+  const idx = state.accounts.findIndex((a) => a.id === id);
+  if (idx >= 0) {
+    state.accounts[idx] = { ...data.account, ...(data.assessment || {}) };
+    render();
+  }
+}
+
+// Client-orchestrated batch: run up to CONCURRENCY assessments at once,
+// updating the UI as each finishes. Replaces the server-side queue + SSE.
+const CONCURRENCY = 5;
+let batchRunning = false;
+
 async function assessBatch(ids) {
-  const body = ids ? { ids } : { onlyPending: true };
-  await fetch(`/api/sessions/${SESSION_ID}/assess`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  if (batchRunning) return;
+  // Default to everything still pending or previously failed.
+  let targets = ids
+    ? state.accounts.filter((a) => ids.includes(a.id))
+    : state.accounts.filter((a) => a.status === 'pending' || a.status === 'failed');
+  targets = targets.map((a) => a.id);
+  const total = targets.length;
+  if (!total) return;
+
+  batchRunning = true;
+  setBatchButtons(true);
+  let done = 0;
+  const queue = [...targets];
+
+  const worker = async () => {
+    while (queue.length) {
+      const id = queue.shift();
+      await assessOne(id);
+      done += 1;
+      $('batchProgress').textContent = `Assessing ${done}/${total}…`;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, worker));
+
+  $('batchProgress').textContent = `Done ${done}/${total}`;
+  batchRunning = false;
+  setBatchButtons(false);
+  setTimeout(() => { if (!batchRunning) $('batchProgress').textContent = ''; }, 4000);
 }
 
 function exportCsv() {
@@ -217,40 +263,6 @@ function exportCsv() {
   let url = `/api/sessions/${SESSION_ID}/export.csv`;
   if (usingFilter) url += `?ids=${rows.map((r) => r.id).join(',')}`;
   window.location = url;
-}
-
-// --- Server-Sent Events ---------------------------------------------------
-function connectEvents() {
-  const es = new EventSource('/api/events');
-  es.addEventListener('update', (e) => {
-    const { accountId, status } = JSON.parse(e.data);
-    const acct = state.accounts.find((a) => a.id === accountId);
-    if (acct) {
-      acct.status = status;
-      // Pull fresh scores once an assessment finishes.
-      if (['assessed', 'flagged', 'modern'].includes(status)) refreshAccount(accountId);
-      else render();
-    } else {
-      loadAccounts();
-    }
-  });
-  es.addEventListener('batch', (e) => {
-    const { done, total, running } = JSON.parse(e.data);
-    $('batchProgress').textContent = running ? `Assessing ${done}/${total}…` : (total ? `Done ${done}/${total}` : '');
-    setBatchButtons(running);
-    if (!running) setTimeout(() => ($('batchProgress').textContent = ''), 4000);
-  });
-  es.onerror = () => { /* EventSource auto-reconnects */ };
-}
-
-async function refreshAccount(id) {
-  const res = await fetch(`/api/accounts/${id}`);
-  const { account, assessment } = await res.json();
-  const idx = state.accounts.findIndex((a) => a.id === id);
-  if (idx >= 0) {
-    state.accounts[idx] = { ...account, ...(assessment || {}) };
-    render();
-  }
 }
 
 function setBatchButtons(running) {
@@ -286,10 +298,7 @@ function wire() {
     const btn = e.target.closest('button[data-action="assess"]');
     if (btn) {
       e.stopPropagation();
-      const id = Number(btn.dataset.id);
-      const acct = state.accounts.find((a) => a.id === id);
-      if (acct) { acct.status = 'fetching'; render(); }
-      assessOne(id);
+      assessOne(Number(btn.dataset.id));
       return;
     }
     const row = e.target.closest('tr[data-id]');
@@ -306,11 +315,9 @@ function wire() {
   $('panelScrim').addEventListener('click', closeDetail);
 
   // Batch controls.
-  $('assessAllBtn').addEventListener('click', () => { setBatchButtons(true); assessBatch(); });
+  $('assessAllBtn').addEventListener('click', () => assessBatch());
   $('assessFilteredBtn').addEventListener('click', () => {
-    const ids = filteredAccounts().map((a) => a.id);
-    setBatchButtons(true);
-    assessBatch(ids);
+    assessBatch(filteredAccounts().map((a) => a.id));
   });
   $('exportBtn').addEventListener('click', exportCsv);
 
@@ -343,4 +350,3 @@ async function submitIngest() {
 wire();
 loadCapability();
 loadAccounts();
-connectEvents();

@@ -1,22 +1,15 @@
-import { EventEmitter } from 'node:events';
-import { config } from './config.js';
+/**
+ * Single-account assessment pipeline: resolve → fetch → score → persist.
+ *
+ * On serverless there is no background work after the HTTP response, so this
+ * runs synchronously within one request and returns the result. Batch
+ * processing is orchestrated by the client, which calls this per account with
+ * bounded concurrency.
+ */
 import { resolveUrl } from './resolver.js';
 import { fetchSite } from './fetcher.js';
 import { scoreAccount } from './scorer.js';
-import {
-  getAccount,
-  updateAccountStatus,
-  saveAssessment,
-} from './db.js';
-
-/** Emits 'update' { accountId, status, account } and 'batch' { sessionId, done, total }. */
-export const bus = new EventEmitter();
-bus.setMaxListeners(0);
-
-// Map blockedReason / verdict to the account status enum.
-function statusForBlock(reason) {
-  return 'failed';
-}
+import { getAccount, getAssessment, updateAccountStatus, saveAssessment } from './db.js';
 
 function statusForVerdict(verdict) {
   if (verdict === 'flagged') return 'flagged';
@@ -24,81 +17,63 @@ function statusForVerdict(verdict) {
   return 'assessed';
 }
 
-/** Run the full pipeline for a single account id. */
+/**
+ * Run the full pipeline for one account id.
+ * Returns { account, assessment } reflecting the final persisted state.
+ */
 export async function assessAccount(accountId) {
-  const account = getAccount(accountId);
-  if (!account) return;
+  const account = await getAccount(accountId);
+  if (!account) return null;
 
-  updateAccountStatus(accountId, 'fetching');
-  bus.emit('update', { accountId, status: 'fetching' });
+  await updateAccountStatus(accountId, 'fetching');
 
   try {
     // 1. Resolve URL.
-    const { url, method } = await resolveUrl(account);
+    const { url } = await resolveUrl(account);
     if (!url) {
-      updateAccountStatus(accountId, 'failed', { error: 'url_resolution_failed' });
-      bus.emit('update', { accountId, status: 'failed' });
-      return;
+      await updateAccountStatus(accountId, 'failed', { error: 'url_resolution_failed' });
+      return finalState(accountId);
     }
-    updateAccountStatus(accountId, 'fetching', { resolved_url: url });
+    await updateAccountStatus(accountId, 'fetching', { resolved_url: url });
 
-    // 2. Fetch + screenshot + tech detect.
+    // 2. Fetch + (optional) screenshot + technology detection.
     const fetchResult = await fetchSite(url, accountId);
     if (!fetchResult.ok) {
-      updateAccountStatus(accountId, 'failed', {
+      await updateAccountStatus(accountId, 'failed', {
         resolved_url: url,
         error: fetchResult.blockedReason || 'fetch_failed',
       });
-      bus.emit('update', { accountId, status: 'failed' });
-      return;
+      return finalState(accountId);
     }
-    updateAccountStatus(accountId, 'fetching', { final_url: fetchResult.finalUrl });
+    await updateAccountStatus(accountId, 'fetching', { final_url: fetchResult.finalUrl });
 
-    // 3. Score.
-    const refreshed = getAccount(accountId);
+    // 3. Score (multimodal when a screenshot is available, else HTML-only).
+    const refreshed = await getAccount(accountId);
     const scored = await scoreAccount({ account: refreshed, fetchResult });
 
     // 4. Persist.
-    saveAssessment(accountId, {
+    await saveAssessment(accountId, {
       ...scored,
       fetch_duration_ms: fetchResult.fetchDurationMs,
       screenshot_desktop_path: fetchResult.screenshots?.desktopPath,
       screenshot_mobile_path: fetchResult.screenshots?.mobilePath,
     });
-
-    const status = statusForVerdict(scored.verdict);
-    updateAccountStatus(accountId, status, { assessed_at: new Date().toISOString() });
-    bus.emit('update', { accountId, status });
+    await updateAccountStatus(accountId, statusForVerdict(scored.verdict), {
+      assessed_at: new Date().toISOString(),
+    });
   } catch (err) {
     console.error(`[pipeline] account ${accountId} failed:`, err.message);
-    updateAccountStatus(accountId, 'failed', { error: err.message.slice(0, 300) });
-    bus.emit('update', { accountId, status: 'failed' });
+    await updateAccountStatus(accountId, 'failed', { error: String(err.message).slice(0, 300) });
   }
+
+  return finalState(accountId);
 }
 
-/**
- * Process a list of account ids with bounded concurrency.
- * Interruptions are safe: each account persists independently, so resuming
- * re-queues only those still pending/failed.
- */
-export async function runBatch(sessionId, accountIds, concurrency = config.maxConcurrentWorkers) {
-  let done = 0;
-  const total = accountIds.length;
-  const queue = [...accountIds];
-
-  bus.emit('batch', { sessionId, done, total, running: true });
-
-  async function worker() {
-    for (;;) {
-      const id = queue.shift();
-      if (id === undefined) return;
-      await assessAccount(id);
-      done += 1;
-      bus.emit('batch', { sessionId, done, total, running: done < total });
-    }
+async function finalState(accountId) {
+  const account = await getAccount(accountId);
+  const assessment = await getAssessment(accountId);
+  if (assessment && typeof assessment.flags === 'string') {
+    try { assessment.flags = JSON.parse(assessment.flags); } catch { assessment.flags = []; }
   }
-
-  const workers = Array.from({ length: Math.min(concurrency, total) }, worker);
-  await Promise.all(workers);
-  bus.emit('batch', { sessionId, done, total, running: false });
+  return { account, assessment };
 }
